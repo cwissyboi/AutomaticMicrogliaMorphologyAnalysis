@@ -1,3 +1,7 @@
 ﻿YOLO_experimentation
 yolo_files/yolov3.weights
 yolo_experimentation_venv
+sam_files
+yolo_pretrained_env
+yolov3_weights.pt
+yolov5
