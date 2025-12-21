@@ -3,9 +3,9 @@ import javax.imageio.ImageIO
 
 def server = getCurrentImageData().getServer()
 
-def tileSize = 512
+def tileSize = 1024
 def downsample = 1.0
-def maxTiles = 1000
+def maxTiles = 10000
 
 def outDir = "C:/Users/chris/Desktop/tiles_test"
 mkdirs(outDir)
@@ -13,13 +13,27 @@ mkdirs(outDir)
 int width = server.getWidth()
 int height = server.getHeight()
 
+// --------------------------------------------------
+// 1) Pre-calculate number of tiles
+// --------------------------------------------------
+int tilesX = (int) Math.ceil(width  / (double) tileSize)
+int tilesY = (int) Math.ceil(height / (double) tileSize)
+
+int totalTiles = tilesX * tilesY
+totalTiles = Math.min(totalTiles, maxTiles)
+
+print "Will export ${totalTiles} tiles (${tilesX} x ${tilesY})"
+
+// --------------------------------------------------
+// 2) Export with progress reporting
+// --------------------------------------------------
 int tileID = 0
 
 outer:
-for (int y = height / 2; y < height; y += tileSize) {
-    for (int x = width / 2 ; x < width; x += tileSize) {
+for (int y = 0; y < height; y += tileSize) {
+    for (int x = 0; x < width; x += tileSize) {
 
-        if (tileID >= maxTiles)
+        if (tileID >= totalTiles)
             break outer
 
         def region = RegionRequest.createInstance(
@@ -34,11 +48,16 @@ for (int y = height / 2; y < height; y += tileSize) {
             continue
 
         def outPath = outDir + File.separator +
-            String.format("tile_%03d_x%d_y%d.jpg", tileID, x, y)
+            String.format("tile_%05d_x%d_y%d.jpg", tileID, x, y)
 
         ImageIO.write(img, "JPEG", new File(outPath))
         tileID++
+
+        // ---- Progress every 100 tiles ----
+        if (tileID % 100 == 0 || tileID == totalTiles) {
+            print "Exported ${tileID} / ${totalTiles} tiles"
+        }
     }
 }
 
-print "Exported ${tileID} tiles"
+print "DONE — Exported ${tileID} tiles"
