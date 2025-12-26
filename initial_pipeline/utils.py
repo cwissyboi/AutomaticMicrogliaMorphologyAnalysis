@@ -1,0 +1,60 @@
+import argparse
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="YOLO inference arguments")
+
+    # Input / output
+    parser.add_argument(
+        "--input_folder_path",
+        type=str,
+        default="input/",
+        help="Root input directory"
+    )
+    parser.add_argument(
+        "--output_folder_path",
+        type=str,
+        default="output/",
+        help="Root output directory"
+    )
+
+    # YOLO files
+    parser.add_argument(
+        "--cfg",
+        type=str,
+        default="yolo_files/yolov3.cfg",
+        help="Path to YOLO config file"
+    )
+    parser.add_argument(
+        "--weights",
+        type=str,
+        default="yolo_files/yolov3.weights",
+        help="Path to YOLO weights file"
+    )
+    parser.add_argument(
+        "--classes",
+        type=str,
+        default="yolo_files/yolov3.txt",
+        help="Path to class labels file"
+    )
+
+    # YOLO parameters
+    parser.add_argument(
+        "--conf_threshold",
+        type=float,
+        default=0.5,
+        help="Confidence threshold"
+    )
+    parser.add_argument(
+        "--nms_threshold",
+        type=float,
+        default=0.1,
+        help="Non-max suppression threshold"
+    )
+    parser.add_argument(
+        "--ignore_class_labels",
+        action="store_true",
+        help="Ignore class labels during inference"
+    )
+
+    return vars(parser.parse_args())

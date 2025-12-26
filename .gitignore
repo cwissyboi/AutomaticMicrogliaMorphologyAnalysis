@@ -6,3 +6,4 @@ yolo_pretrained_env
 yolov3_weights.pt
 yolov5
 preprocess_venv
+initial_pipeline/__pycache__
