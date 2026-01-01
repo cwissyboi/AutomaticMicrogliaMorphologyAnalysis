@@ -45,8 +45,34 @@ def get_gaussian_filter_soma_masks(boxes, image_path, image_rgb, output_to_file 
 
         soma_masks.append(soma_mask)
     
+    for i, soma_mask in enumerate(soma_masks):
+        soma_uint8 = (soma_mask > 0).astype(np.uint8) * 255
+        soma_filled = fill_holes(soma_uint8)
+        # replace original mask with the filled version
+        soma_masks[i] = soma_filled
 
     if (output_to_file): 
         output_masks_to_file_overlay(output_folder, image_path, soma_masks, image_rgb, suffix = 'soma_mask')
     
     return soma_masks
+
+
+def fill_holes(binary_mask):
+    """
+    binary_mask: uint8 image with values {0,255}
+    returns: uint8 image with holes filled
+    """
+    # Copy mask
+    filled = binary_mask.copy()
+
+    h, w = filled.shape
+
+    # Flood fill from the outside
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+    cv2.floodFill(filled, mask, seedPoint=(0, 0), newVal=255)
+
+    # Invert flood-filled image
+    filled_inv = cv2.bitwise_not(filled)
+
+    # Combine with original to fill holes
+    return cv2.bitwise_or(binary_mask, filled_inv)
