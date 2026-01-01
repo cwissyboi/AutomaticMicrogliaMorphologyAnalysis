@@ -60,7 +60,7 @@ def yolo_inference(yolo, image_path, output_to_file = False, confidence_threshol
         file_name = get_file_name(image_path)
 
         cv2.imwrite(
-            f"object_detection/object_detection_output/{file_name}.jpg",
+            f"object_detection/object_detection_output/{file_name}_yolo_identification.jpg",
             annotated_img_bgr
         )
 

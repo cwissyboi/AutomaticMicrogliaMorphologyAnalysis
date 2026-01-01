@@ -3,9 +3,11 @@ import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
 import os
-from helpers import get_file_name
+from helpers import get_file_name, output_masks_to_file_overlay
 
-def sam_inference(sam_predictor, boxes, image_path, prompt_type="point", output_to_file = False):
+def sam_inference(sam_predictor, boxes, image_path, image_rgb, 
+                  prompt_type="point", output_to_file = False, 
+                  output_folder = "segmentation/segmentation_output/sam_segmentation/"):
     """
     Run Segment Anything Model (SAM) inference using either point-based
     or box-based prompts derived from YOLO bounding boxes.
@@ -43,11 +45,6 @@ def sam_inference(sam_predictor, boxes, image_path, prompt_type="point", output_
         image dimensions.
     """
     
-    image = cv2.imread(image_path)
-    h, w = image.shape[:2]
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    
     sam_predictor.set_image(image_rgb)
 
     masks = []
@@ -78,35 +75,8 @@ def sam_inference(sam_predictor, boxes, image_path, prompt_type="point", output_
     
     
     if (output_to_file):
-        os.makedirs("segmentation/segmentation_output/overlays", exist_ok=True)
+        output_masks_to_file_overlay(output_folder, image_path, masks, image_rgb, suffix = 'sam_outline')
 
-        # Copy original image (RGB)
-        overlay = image_rgb.copy()
-
-        for i, mask in enumerate(masks):
-            # soma_mask is uint8 {0,255} or bool, ensure uint8
-            mask_uint8 = (mask > 0).astype(np.uint8) * 255
-
-            # Find contours of soma
-            contours, _ = cv2.findContours(
-                mask_uint8,
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE
-            )
-
-            # Draw soma contours (blue, slightly thicker)
-            cv2.drawContours(
-                overlay,
-                contours,
-                contourIdx=-1,
-                color=(0, 0, 255),  # blue soma
-                thickness=2
-            )
-
-        # Save result
-        file_name = get_file_name(image_path)
-        out_path = f"segmentation/segmentation_output/overlays/{file_name}_mask.jpg"
-        cv2.imwrite(out_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
 
     print('SAM done')
     return masks
