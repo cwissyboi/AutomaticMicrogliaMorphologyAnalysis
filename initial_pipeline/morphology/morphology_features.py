@@ -12,9 +12,9 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_name,  o
     skeletons = []
 
     for mask, soma_mask in zip(cell_masks, soma_masks):
-        # ----------------------------
+    
         # 1. Skeletonise full cell
-        # ----------------------------
+ 
         cell_bin = mask > 0
         skeleton = skeletonize(cell_bin)
 
@@ -30,9 +30,9 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_name,  o
             ys, xs = np.where(process_skeleton)
             overlay[ys, xs] = [0, 255, 0]
 
-            # ----------------------------
+         
             # 2. Draw soma outline
-            # ----------------------------
+        
             soma_uint8 = (soma_bin.astype(np.uint8) * 255)
 
             contours, _ = cv2.findContours(
@@ -60,6 +60,54 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_name,  o
 
 
 
+def compute_skeleton_length(skeleton):
+    """
+    Number of skeleton pixels.
+    """
+    return int(skeleton.sum())
+
+
+def compute_branch_count(skeleton):
+    """
+    Count skeleton branch points (pixels with ≥ 3 neighbors).
+    """
+    kernel = np.array([
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1]
+    ])
+
+    neighbors = convolve(
+        skeleton.astype(np.uint8),
+        kernel,
+        mode="constant",
+        cval=0
+    )
+
+    branch_points = np.logical_and(skeleton, neighbors >= 3)
+    return int(branch_points.sum())
+
+
+def compute_skeleton_components(skeleton):
+    """
+    Number of connected components in the skeleton (8-connectivity).
+    """
+    structure = np.ones((3, 3), dtype=np.uint8)
+    _, num_components = label(skeleton, structure=structure)
+    return int(num_components)
+
+
+
+def compute_mask_area(mask):
+    """
+    Area of soma region in pixels.
+    """
+    if mask is None:
+        return 0
+    return int((mask > 0).sum())
+
+
+
 
 def get_morphological_features(mask, skeleton=None, soma_mask=None):
     """
@@ -82,51 +130,21 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
 
     skeleton = skeleton.astype(bool)
 
-    # Skeleton length
-    length_pixels = int(skeleton.sum())
 
-    # -------------------------
-    # Branch points
-    # -------------------------
-    kernel = np.array([
-        [1, 1, 1],
-        [1, 0, 1],
-        [1, 1, 1]
-    ])
 
-    neighbors = convolve(
-        skeleton.astype(np.uint8),
-        kernel,
-        mode="constant",
-        cval=0
+    length_pixels = compute_skeleton_length(skeleton)
+    num_branches = compute_branch_count(skeleton)
+    soma_area = compute_mask_area(soma_mask)
+    num_components = compute_skeleton_components(skeleton)
+    cell_area = compute_mask_area(mask)
+
+    return (
+        length_pixels,
+        num_branches,
+        soma_area,
+        num_components,
+        cell_area
     )
-
-    branch_points = np.logical_and(skeleton, neighbors >= 3)
-    num_branches = int(branch_points.sum())
-
-    # -------------------------
-    # Soma area
-    # -------------------------
-    if soma_mask is not None:
-        soma_area = int((soma_mask > 0).sum())
-    else:
-        soma_area = 0
-
-    if mask is not None:
-        cell_area = int((mask > 0).sum())
-    else:
-        cell_area = 0
-
-    # -------------------------
-    # Connected components
-    # -------------------------
-    structure = np.ones((3, 3), dtype=np.uint8)  # 8-connectivity
-    labeled, num_components = label(skeleton, structure=structure)
-
-    return length_pixels, num_branches, soma_area, num_components, cell_area
-
-
-
 
 
 
