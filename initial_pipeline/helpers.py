@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 
 def parse_args():
@@ -66,3 +67,29 @@ def parse_args():
     )
 
     return vars(parser.parse_args())
+
+
+def get_file_name(file_path):
+    """
+    Extract the base filename (without directories or file extension)
+    from a file path.
+
+    Parameters
+    ----------
+    file_path : str or pathlib.Path
+        Path to a file.
+
+    Returns
+    -------
+    str
+        Filename without directory and extension.
+
+    Examples
+    --------
+    >>> get_stem_from_path("C:/data/images/sample_image.jpg")
+    'sample_image'
+
+    >>> get_stem_from_path("../toy_dataset/third_screenshot.png")
+    'third_screenshot'
+    """
+    return Path(file_path).stem

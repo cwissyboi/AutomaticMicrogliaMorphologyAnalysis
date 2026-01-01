@@ -2,7 +2,7 @@ import torch
 import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
-
+from helpers import get_file_name
 
 def yolo_inference(yolo, image_path, output_to_file = False, confidence_threshold = 0.5):
     """
@@ -57,9 +57,10 @@ def yolo_inference(yolo, image_path, output_to_file = False, confidence_threshol
     if output_to_file:
         annotated_img = results.render()[0]  # RGB
         annotated_img_bgr = cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR)
+        file_name = get_file_name(image_path)
 
         cv2.imwrite(
-            "object_detection/object_detection_output/temp.jpg",
+            f"object_detection/object_detection_output/{file_name}.jpg",
             annotated_img_bgr
         )
 
