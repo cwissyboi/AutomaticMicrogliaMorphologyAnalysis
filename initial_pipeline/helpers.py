@@ -11,6 +11,14 @@ def parse_args():
         default="input/",
         help="Root input directory"
     )
+
+    parser.add_argument(
+        "--image_path",
+        type=str,
+        default="input/example_image.jpeg",
+        help="path to only 1 image that you would like to do an analysis on"
+    )
+
     parser.add_argument(
         "--output_folder_path",
         type=str,

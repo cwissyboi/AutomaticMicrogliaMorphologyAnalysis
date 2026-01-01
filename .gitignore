@@ -7,3 +7,4 @@ yolov3_weights.pt
 yolov5
 preprocess_venv
 initial_pipeline/__pycache__
+initial_pipeline/object_detection/yolo_pretrained/__pycache__
