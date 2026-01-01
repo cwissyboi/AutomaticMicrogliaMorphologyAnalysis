@@ -23,10 +23,10 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--output_folder_path",
+        "--output_name",
         type=str,
-        default="output/",
-        help="Root output directory"
+        default="output",
+        help="will be used as both a directory and csv file name"
     )
 
     # YOLO files

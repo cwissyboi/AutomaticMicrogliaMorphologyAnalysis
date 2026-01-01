@@ -6,7 +6,7 @@ from helpers import get_file_name
 from scipy.ndimage import convolve, label
 import pandas as pd
 
-def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file = False, output_folder = 'morphology/skeleton_outputs/'): 
+def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_name,  output_to_file = False, output_folder = 'morphology/skeleton_outputs/'): 
 
     overlay = image_rgb.copy()
     skeletons = []
@@ -53,7 +53,7 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file 
     if (output_to_file):
         # Save combined overlay
         file_name = get_file_name(image_path)
-        out_path = f"{output_folder}{file_name}_skeleton.png"
+        out_path = f"{output_folder}{output_name}/{file_name}_skeleton.png"
         cv2.imwrite(out_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
 
     return skeletons

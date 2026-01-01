@@ -3,8 +3,9 @@ import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
 from helpers import get_file_name
+import os
 
-def yolo_inference(yolo, image_path, output_to_file = False, confidence_threshold = 0.5):
+def yolo_inference(yolo, image_path, output_name, output_to_file = False, confidence_threshold = 0.5):
     """
     Run YOLO object detection on a single image and return filtered bounding boxes.
 
@@ -59,10 +60,12 @@ def yolo_inference(yolo, image_path, output_to_file = False, confidence_threshol
         annotated_img_bgr = cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR)
         file_name = get_file_name(image_path)
 
+        output_folder = f"object_detection/object_detection_output/{output_name}/"
+        os.makedirs(output_folder, exist_ok=True)
+
         cv2.imwrite(
-            f"object_detection/object_detection_output/{file_name}_yolo_identification.jpg",
+            f"{output_folder}{file_name}_yolo_identification.jpg",
             annotated_img_bgr
         )
 
-    print('YOLO object identification done')
     return boxes

@@ -3,7 +3,8 @@ import numpy as np
 from helpers import output_masks_to_file_overlay
 
 
-def get_gaussian_filter_soma_masks(boxes, image_path, image_rgb, output_to_file = False, output_folder = "segmentation/segmentation_output/soma_segmentation/"):
+def get_gaussian_filter_soma_masks(boxes, image_path, image_rgb, output_name,
+                                    output_to_file = False, output_folder = "segmentation/segmentation_output/soma_segmentation/"):
     soma_masks = []
     red = image_rgb[:, :, 0]
 
@@ -52,6 +53,7 @@ def get_gaussian_filter_soma_masks(boxes, image_path, image_rgb, output_to_file 
         soma_masks[i] = soma_filled
 
     if (output_to_file): 
+        output_folder = output_folder + output_name + '/'
         output_masks_to_file_overlay(output_folder, image_path, soma_masks, image_rgb, suffix = 'soma_mask')
     
     return soma_masks

@@ -5,7 +5,7 @@ from segment_anything import sam_model_registry, SamPredictor
 import os
 from helpers import get_file_name, output_masks_to_file_overlay
 
-def sam_inference(sam_predictor, boxes, image_path, image_rgb, 
+def sam_inference(sam_predictor, boxes, image_path, image_rgb, output_name, 
                   prompt_type="point", output_to_file = False, 
                   output_folder = "segmentation/segmentation_output/sam_segmentation/"):
     """
@@ -75,6 +75,7 @@ def sam_inference(sam_predictor, boxes, image_path, image_rgb,
     
     
     if (output_to_file):
+        output_folder = output_folder + output_name + '/'
         output_masks_to_file_overlay(output_folder, image_path, masks, image_rgb, suffix = 'sam_outline')
 
 
