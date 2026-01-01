@@ -5,6 +5,8 @@ from skimage.morphology import skeletonize
 from helpers import get_file_name
 from scipy.ndimage import convolve, label
 import pandas as pd
+import math
+
 
 def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_name,  output_to_file = False, output_folder = 'morphology/skeleton_outputs/'): 
 
@@ -108,6 +110,98 @@ def compute_mask_area(mask):
 
 
 
+def compute_mask_perimeter(mask):
+    """
+    Compute the perimeter of a binary mask in pixels.
+
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        2D binary mask (bool or 0/1 or 0/255).
+
+    Returns
+    -------
+    float
+        Perimeter length in pixels.
+    """
+
+    # Ensure uint8 binary mask
+    mask_uint8 = (mask > 0).astype(np.uint8) * 255
+
+    # Find external contours
+    contours, _ = cv2.findContours(
+        mask_uint8,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE
+    )
+
+    # Sum perimeters of all contours
+    perimeter = sum(
+        cv2.arcLength(cnt, closed=True)
+        for cnt in contours
+    )
+
+    return float(perimeter)
+
+
+def compute_convex_hull(mask):
+    """
+    Compute the convex hull contour of a binary mask.
+
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        2D binary mask (bool or 0/1 or 0/255).
+
+    Returns
+    -------
+    numpy.ndarray or None
+        Convex hull contour (Nx1x2), or None if mask is empty.
+    """
+
+    mask_uint8 = (mask > 0).astype(np.uint8) * 255
+
+    contours, _ = cv2.findContours(
+        mask_uint8,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    if not contours:
+        return None
+
+    # Merge all contours into one
+    all_points = np.vstack(contours)
+
+    hull = cv2.convexHull(all_points)
+    return hull
+
+
+
+def compute_convex_hull_area(mask):
+    """
+    Compute convex hull area (pixels²) from a binary mask.
+    """
+    hull = compute_convex_hull(mask)
+    if hull is None:
+        return 0.0
+
+    return float(cv2.contourArea(hull))
+
+
+def compute_convex_hull_perimeter(mask):
+    """
+    Compute convex hull perimeter (pixels) from a binary mask.
+    """
+    hull = compute_convex_hull(mask)
+    if hull is None:
+        return 0.0
+
+    return float(cv2.arcLength(hull, closed=True))
+
+
+
+
 
 def get_morphological_features(mask, skeleton=None, soma_mask=None):
     """
@@ -134,17 +228,38 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
 
     length_pixels = compute_skeleton_length(skeleton)
     num_branches = compute_branch_count(skeleton)
-    soma_area = compute_mask_area(soma_mask)
     num_components = compute_skeleton_components(skeleton)
+    
+    soma_area = compute_mask_area(soma_mask)
+    soma_perimeter = compute_mask_perimeter(soma_mask)
+    soma_circularity = (4 * math.pi * soma_area) / (soma_perimeter ** 2)
+
+
     cell_area = compute_mask_area(mask)
+    cell_perimeter = compute_mask_perimeter(mask)
+    cell_convex_hull_area = compute_convex_hull_area(mask)
+    cell_convex_hull_perimeter = compute_convex_hull_perimeter(mask)
+    cell_solidity = cell_area / cell_convex_hull_area
+    cell_convexity = cell_convex_hull_perimeter / cell_perimeter
+    cell_circularity = (4 * math.pi * cell_area) / (cell_perimeter ** 2)
+
 
     return (
-        length_pixels,
-        num_branches,
-        soma_area,
-        num_components,
-        cell_area
+        length_pixels, 
+        num_branches, 
+        num_components, 
+        soma_area, 
+        soma_perimeter, 
+        soma_circularity, 
+        cell_area, 
+        cell_perimeter, 
+        cell_convex_hull_area, 
+        cell_convex_hull_perimeter, 
+        cell_solidity, 
+        cell_convexity, 
+        cell_circularity
     )
+
 
 
 
@@ -163,7 +278,7 @@ def get_morphology_dataframe(
         List of full cell segmentation masks (2D, binary).
 
     skeletons : list of numpy.ndarray
-        List of skeletonized masks corresponding to `sam_masks`.
+        List of skeletonized masks corresponding to `cell_masks`.
 
     soma_masks : list of numpy.ndarray
         List of soma masks (2D, binary), one per cell.
@@ -172,12 +287,21 @@ def get_morphology_dataframe(
     -------
     pandas.DataFrame
         DataFrame with one row per cell and the following columns:
+
         - cell_id
         - length_pixels
         - num_branches
-        - soma_area
         - num_components
+        - soma_area
+        - soma_perimeter
+        - soma_circularity
         - cell_area
+        - cell_perimeter
+        - cell_convex_hull_area
+        - cell_convex_hull_perimeter
+        - cell_solidity
+        - cell_convexity
+        - cell_circularity
     """
 
     records = []
@@ -186,20 +310,36 @@ def get_morphology_dataframe(
         zip(cell_masks, skeletons, soma_masks)
     ):
         (
-            length_px,
+            length_pixels,
             num_branches,
-            soma_area,
             num_components,
-            cell_area
+            soma_area,
+            soma_perimeter,
+            soma_circularity,
+            cell_area,
+            cell_perimeter,
+            cell_convex_hull_area,
+            cell_convex_hull_perimeter,
+            cell_solidity,
+            cell_convexity,
+            cell_circularity
         ) = get_morphological_features(mask, skeleton, soma_mask)
 
         record = {
             "cell_id": i,
-            "length_pixels": length_px,
+            "length_pixels": length_pixels,
             "num_branches": num_branches,
-            "soma_area": soma_area,
             "num_components": num_components,
+            "soma_area": soma_area,
+            "soma_perimeter": soma_perimeter,
+            "soma_circularity": soma_circularity,
             "cell_area": cell_area,
+            "cell_perimeter": cell_perimeter,
+            "cell_convex_hull_area": cell_convex_hull_area,
+            "cell_convex_hull_perimeter": cell_convex_hull_perimeter,
+            "cell_solidity": cell_solidity,
+            "cell_convexity": cell_convexity,
+            "cell_circularity": cell_circularity,
         }
 
         records.append(record)
