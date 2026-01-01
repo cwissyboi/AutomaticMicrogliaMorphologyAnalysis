@@ -4,6 +4,7 @@ import os
 from skimage.morphology import skeletonize
 from helpers import get_file_name
 from scipy.ndimage import convolve, label
+import pandas as pd
 
 def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file = False, output_folder = 'morphology/skeleton_outputs/'): 
 
@@ -60,7 +61,7 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file 
 
 
 
-def skeleton_metrics(mask, skeleton=None, soma_mask=None):
+def get_morphological_features(mask, skeleton=None, soma_mask=None):
     """
     mask: boolean or 0/1 numpy array (full cell mask)
     skeleton: optional precomputed skeleton (bool)
@@ -123,3 +124,66 @@ def skeleton_metrics(mask, skeleton=None, soma_mask=None):
     labeled, num_components = label(skeleton, structure=structure)
 
     return length_pixels, num_branches, soma_area, num_components, cell_area
+
+
+
+
+
+
+def get_morphology_dataframe(
+    cell_masks,
+    skeletons,
+    soma_masks
+):
+    """
+    Compute morphological features for a set of segmented cells and
+    return the results as a pandas DataFrame.
+
+    Parameters
+    ----------
+    cell_masks : list of numpy.ndarray
+        List of full cell segmentation masks (2D, binary).
+
+    skeletons : list of numpy.ndarray
+        List of skeletonized masks corresponding to `sam_masks`.
+
+    soma_masks : list of numpy.ndarray
+        List of soma masks (2D, binary), one per cell.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with one row per cell and the following columns:
+        - cell_id
+        - length_pixels
+        - num_branches
+        - soma_area
+        - num_components
+        - cell_area
+    """
+
+    records = []
+
+    for i, (mask, skeleton, soma_mask) in enumerate(
+        zip(cell_masks, skeletons, soma_masks)
+    ):
+        (
+            length_px,
+            num_branches,
+            soma_area,
+            num_components,
+            cell_area
+        ) = get_morphological_features(mask, skeleton, soma_mask)
+
+        record = {
+            "cell_id": i,
+            "length_pixels": length_px,
+            "num_branches": num_branches,
+            "soma_area": soma_area,
+            "num_components": num_components,
+            "cell_area": cell_area,
+        }
+
+        records.append(record)
+
+    return pd.DataFrame(records)

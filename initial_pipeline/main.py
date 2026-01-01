@@ -1,8 +1,8 @@
-from helpers import parse_args
+from helpers import parse_args, get_file_name
 from object_detection.yolo_pretrained.yolo_inference import yolo_inference
 from segmentation.sam.sam_inference import sam_inference
 from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_soma_masks
-from morphology.morphology_features import get_skeletons, skeleton_metrics
+from morphology.morphology_features import get_skeletons, get_morphology_dataframe
 import torch
 import cv2
 import numpy as np
@@ -12,6 +12,7 @@ from segment_anything import sam_model_registry, SamPredictor
 def main():
     args = parse_args()
     image_path = args["image_path"]
+    file_name = get_file_name(image_path)
 
 
     # Load yolo model from saved output
@@ -46,32 +47,12 @@ def main():
 
 
 
-    results = []
+    results_df = get_morphology_dataframe(sam_masks, skeletons, soma_masks)
 
-    for i, mask in enumerate(sam_masks):
-        skeleton = skeletons[i]
-        filled_soma = soma_masks[i]
-        length_px, num_branches, soma_area, num_components, cell_area = skeleton_metrics(mask, skeleton, filled_soma)
-
-        results.append({
-            "cell_id": i,
-            "length_pixels": length_px,
-            "num_branches": num_branches, 
-            "soma_area": soma_area, 
-            "num_components": num_components, 
-            "cell_area": cell_area, 
-        })
-
-        print(
-            f"Cell {i:02d} | "
-            f"Length: {length_px:5d} px | "
-            f"Branches: {num_branches}  | "
-            f"soma_area: {soma_area:5d} px | "
-            f"num_components: {num_components:5d}  | "
-            f"cell_area: {cell_area:5d}  | "
-        )
-
-
+    print(results_df)
+    
+    # Save results to a csv for analysis
+    results_df.to_csv(f'morphology/morphology_outputs/{file_name}.csv')
 
 if __name__ == "__main__":
     main()
