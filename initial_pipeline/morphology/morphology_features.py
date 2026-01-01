@@ -3,7 +3,7 @@ import cv2
 import os
 from skimage.morphology import skeletonize
 from helpers import get_file_name
-
+from scipy.ndimage import convolve, label
 
 def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file = False, output_folder = 'morphology/skeleton_outputs/'): 
 
@@ -56,3 +56,70 @@ def get_skeletons(image_rgb, image_path, cell_masks, soma_masks, output_to_file 
         cv2.imwrite(out_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
 
     return skeletons
+
+
+
+
+def skeleton_metrics(mask, skeleton=None, soma_mask=None):
+    """
+    mask: boolean or 0/1 numpy array (full cell mask)
+    skeleton: optional precomputed skeleton (bool)
+    soma_mask: boolean or 0/1 numpy array (soma region)
+
+    returns:
+        length_pixels: int
+        num_branches: int
+        soma_area: int (pixels)
+        num_components: int (disconnected skeleton components)
+    """
+
+    # -------------------------
+    # Skeleton
+    # -------------------------
+    if skeleton is None:
+        skeleton = skeletonize(mask > 0)
+
+    skeleton = skeleton.astype(bool)
+
+    # Skeleton length
+    length_pixels = int(skeleton.sum())
+
+    # -------------------------
+    # Branch points
+    # -------------------------
+    kernel = np.array([
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1]
+    ])
+
+    neighbors = convolve(
+        skeleton.astype(np.uint8),
+        kernel,
+        mode="constant",
+        cval=0
+    )
+
+    branch_points = np.logical_and(skeleton, neighbors >= 3)
+    num_branches = int(branch_points.sum())
+
+    # -------------------------
+    # Soma area
+    # -------------------------
+    if soma_mask is not None:
+        soma_area = int((soma_mask > 0).sum())
+    else:
+        soma_area = 0
+
+    if mask is not None:
+        cell_area = int((mask > 0).sum())
+    else:
+        cell_area = 0
+
+    # -------------------------
+    # Connected components
+    # -------------------------
+    structure = np.ones((3, 3), dtype=np.uint8)  # 8-connectivity
+    labeled, num_components = label(skeleton, structure=structure)
+
+    return length_pixels, num_branches, soma_area, num_components, cell_area

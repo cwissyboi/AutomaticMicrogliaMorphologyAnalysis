@@ -2,7 +2,7 @@ from helpers import parse_args
 from object_detection.yolo_pretrained.yolo_inference import yolo_inference
 from segmentation.sam.sam_inference import sam_inference
 from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_soma_masks
-from morphology.morphology_features import get_skeletons
+from morphology.morphology_features import get_skeletons, skeleton_metrics
 import torch
 import cv2
 import numpy as np
@@ -43,6 +43,34 @@ def main():
 
     soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_to_file= True)
     skeletons = get_skeletons(image_rgb, image_path, sam_masks, soma_masks, output_to_file = True)
+
+
+
+    results = []
+
+    for i, mask in enumerate(sam_masks):
+        skeleton = skeletons[i]
+        filled_soma = soma_masks[i]
+        length_px, num_branches, soma_area, num_components, cell_area = skeleton_metrics(mask, skeleton, filled_soma)
+
+        results.append({
+            "cell_id": i,
+            "length_pixels": length_px,
+            "num_branches": num_branches, 
+            "soma_area": soma_area, 
+            "num_components": num_components, 
+            "cell_area": cell_area, 
+        })
+
+        print(
+            f"Cell {i:02d} | "
+            f"Length: {length_px:5d} px | "
+            f"Branches: {num_branches}  | "
+            f"soma_area: {soma_area:5d} px | "
+            f"num_components: {num_components:5d}  | "
+            f"cell_area: {cell_area:5d}  | "
+        )
+
 
 
 if __name__ == "__main__":
