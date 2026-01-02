@@ -266,7 +266,8 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
 def get_morphology_dataframe(
     cell_masks,
     skeletons,
-    soma_masks
+    soma_masks, 
+    boxes
 ):
     """
     Compute morphological features for a set of segmented cells and
@@ -306,8 +307,8 @@ def get_morphology_dataframe(
 
     records = []
 
-    for i, (mask, skeleton, soma_mask) in enumerate(
-        zip(cell_masks, skeletons, soma_masks)
+    for i, (mask, skeleton, soma_mask, box) in enumerate(
+        zip(cell_masks, skeletons, soma_masks, boxes)
     ):
         (
             length_pixels,
@@ -325,6 +326,9 @@ def get_morphology_dataframe(
             cell_circularity
         ) = get_morphological_features(mask, skeleton, soma_mask)
 
+        x_min, y_min, x_max, y_max = box
+
+
         record = {
             "cell_id": i,
             "length_pixels": length_pixels,
@@ -340,6 +344,10 @@ def get_morphology_dataframe(
             "cell_solidity": cell_solidity,
             "cell_convexity": cell_convexity,
             "cell_circularity": cell_circularity,
+            "xmin": x_min,
+            "ymin": y_min,
+            "xmax": x_max,
+            "ymax": y_max,
         }
 
         records.append(record)
