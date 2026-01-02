@@ -54,7 +54,7 @@ def main():
             sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
             soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= True)
             skeletons = get_skeletons(image_rgb, image_path, sam_masks, soma_masks, output_to_file = True, output_name = output_name)
-            results_df = get_morphology_dataframe(sam_masks, skeletons, soma_masks)
+            results_df = get_morphology_dataframe(sam_masks, skeletons, soma_masks, yolo_boxes)
 
             # results_df["image_path"] = image_path
             results_df["image_name"] = file_name
