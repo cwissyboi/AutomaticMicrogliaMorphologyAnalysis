@@ -11,7 +11,7 @@ import javax.imageio.ImageIO
 
 
 // ================= USER SETTINGS =================
-def outDir = "C:/Users/chris/Desktop/AnnotationsTest"
+def outDir = "C:/Users/chris/Desktop/University/Thesis/AnnotationsData/Segmentations"
 
 // Base downsample (minimum). 1.0 = full res
 def baseDownsample = 1.0
@@ -27,18 +27,25 @@ def padPx = 0
 // ================================================
 
 
-// Reduce chances of ImageIO temp-file stalls on Windows
+// Avoid ImageIO disk cache stalls on Windows
 ImageIO.setUseCache(false)
 
-def imgDir = buildFilePath(outDir, "images")
-def maskDir = buildFilePath(outDir, "masks")
-mkdirs(imgDir)
-mkdirs(maskDir)
+// Base folders
+def imagesRoot = buildFilePath(outDir, "images")
+def masksRoot  = buildFilePath(outDir, "masks")
+mkdirs(imagesRoot)
+mkdirs(masksRoot)
 
 def imageData = getCurrentImageData()
 def server = imageData.getServer()
 def hierarchy = imageData.getHierarchy()
 def imageName = getProjectEntry().getImageName()
+
+// Per-image folders
+def imageImgDir  = buildFilePath(imagesRoot, imageName)
+def imageMaskDir = buildFilePath(masksRoot,  imageName)
+mkdirs(imageImgDir)
+mkdirs(imageMaskDir)
 
 def annotations = hierarchy.getAnnotationObjects()
 def total = annotations.size()
@@ -49,6 +56,7 @@ int fullH = server.getHeight()
 
 println "▶ Found ${total} annotations"
 println "▶ Image size: ${fullW} x ${fullH} (level 0)"
+println "▶ Output image folder: ${imageImgDir}"
 
 
 annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
@@ -100,13 +108,17 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
         def className = pathClass == null ? "Unclassified" : pathClass.toString()
         className = className.replaceAll("[^a-zA-Z0-9_-]", "_")
 
-        // ---- Filename ----
+        // Per-class folders (created on demand)
+        def classImgDir  = buildFilePath(imageImgDir,  className)
+        def classMaskDir = buildFilePath(imageMaskDir, className)
+        mkdirs(classImgDir)
+        mkdirs(classMaskDir)
+
+        // ---- Filename (still includes bbox for traceability) ----
         def baseName =
-            "${imageName}" +
-            "__cls-${className}" +
+            "ann-${idx}" +
             "__x-${x}_y-${y}_w-${w}_h-${h}" +
-            "__ds-${ds as int}" +
-            "__ann-${idx}"
+            "__ds-${ds as int}"
 
         def request = RegionRequest.createInstance(
             server.getPath(),
@@ -119,7 +131,7 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
 
         // ---------- IMAGE ----------
         BufferedImage img = server.readRegion(request)
-        ImageIO.write(img, "PNG", new File(imgDir, baseName + ".png"))
+        ImageIO.write(img, "PNG", new File(classImgDir, baseName + ".png"))
 
         // ---------- MASK ----------
         BufferedImage mask = new BufferedImage(
@@ -140,7 +152,7 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
         g2d.dispose()
 
         ImagePlus maskImp = new ImagePlus("mask", mask)
-        IJ.save(maskImp, new File(maskDir, baseName + ".png").getAbsolutePath())
+        IJ.save(maskImp, new File(classMaskDir, baseName + ".png").getAbsolutePath())
         maskImp.close()
 
         img.flush()
@@ -148,7 +160,7 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
 
         if ((idx + 1) % 25 == 0) System.gc()
 
-        println "[${idx + 1} / ${total}] Exported ${baseName}"
+        println "[${idx + 1} / ${total}] Exported ${imageName}/${className}/${baseName}"
 
     } catch (Exception e) {
         println "[${idx + 1} / ${total}] ERROR on annotation ${idx}: ${e.getMessage()}"
