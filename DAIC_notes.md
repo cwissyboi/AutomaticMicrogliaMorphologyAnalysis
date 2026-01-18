@@ -56,6 +56,15 @@ conda info --envs
 conda activate env_name
 conda activate /home/nfs/ccharlesworth/myenv
 
+pip install without using a cache
+pip install --no-cache-dir pandas
+
+pip install --no-cache-dir -r initial_pipeline_requirements.txt
+
+Create conda environment in the home directory
+conda create --prefix ./myenv python=3.12
+conda activate ./myenv
+
 
 
 

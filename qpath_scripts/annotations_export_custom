@@ -1,0 +1,89 @@
+import qupath.lib.regions.RegionRequest
+import qupath.lib.objects.PathAnnotationObject
+import qupath.lib.roi.interfaces.ROI
+import ij.IJ
+import ij.ImagePlus
+
+import java.awt.image.BufferedImage
+import java.awt.Graphics2D
+import java.awt.Color
+import javax.imageio.ImageIO
+
+
+// ================= USER SETTINGS =================
+def outDir = "C:/Users/chris/Desktop/AnnotationsTest"
+def downsample = 1.0
+
+def imgDir = buildFilePath(outDir, "images")
+def maskDir = buildFilePath(outDir, "masks")
+mkdirs(imgDir)
+mkdirs(maskDir)
+// ================================================
+
+
+def imageData = getCurrentImageData()
+def server = imageData.getServer()
+def hierarchy = imageData.getHierarchy()
+def imageName = getProjectEntry().getImageName()
+
+def annotations = hierarchy.getAnnotationObjects()
+def total = annotations.size()
+
+println "▶ Found ${total} annotations"
+
+
+annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
+
+    ROI roi = ann.getROI()
+
+    double x = roi.getBoundsX()
+    double y = roi.getBoundsY()
+    double w = roi.getBoundsWidth()
+    double h = roi.getBoundsHeight()
+
+    if (w <= 1 || h <= 1) {
+        println "[${idx + 1} / ${total}] Skipping tiny annotation ${idx}"
+        return
+    }
+
+    def request = RegionRequest.createInstance(
+        server.getPath(),
+        downsample,
+        x as int,
+        y as int,
+        w as int,
+        h as int
+    )
+
+    // ---------- IMAGE ----------
+    BufferedImage img = server.readRegion(request)
+    def imgOut = new File(imgDir, "${imageName}_ann_${idx}.png")
+    ImageIO.write(img, "PNG", imgOut)
+
+    // ---------- MASK ----------
+    BufferedImage mask = new BufferedImage(
+        img.getWidth(),
+        img.getHeight(),
+        BufferedImage.TYPE_BYTE_GRAY
+    )
+
+    Graphics2D g2d = mask.createGraphics()
+    g2d.setColor(Color.BLACK)
+    g2d.fillRect(0, 0, mask.getWidth(), mask.getHeight())
+
+    g2d.setColor(Color.WHITE) // 255
+    def shape = roi.getShape()
+    g2d.translate(-x, -y)
+    g2d.fill(shape)
+    g2d.dispose()
+
+    ImagePlus maskImp = new ImagePlus("mask", mask)
+    def maskOut = new File(maskDir, "${imageName}_ann_${idx}.png")
+    IJ.save(maskImp, maskOut.getAbsolutePath())
+    maskImp.close()
+
+    // ---------- PROGRESS ----------
+    println "[${idx + 1} / ${total}] Exported annotation ${idx}"
+}
+
+println "✅ Done exporting ${total} annotations"
