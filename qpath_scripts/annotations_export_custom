@@ -16,8 +16,7 @@ def outDir = "C:/Users/chris/Desktop/AnnotationsTest"
 // Base downsample (minimum). 1.0 = full res
 def baseDownsample = 1.0
 
-// Max width/height (in pixels) of exported patches AFTER downsampling.
-// Lower this if you still hit memory issues.
+// Max width/height (in pixels) of exported patches AFTER downsampling
 def maxPatchSidePx = 1024
 
 // If an annotation is still bigger than this after auto-downsampling, skip it
@@ -50,7 +49,6 @@ int fullH = server.getHeight()
 
 println "▶ Found ${total} annotations"
 println "▶ Image size: ${fullW} x ${fullH} (level 0)"
-println "▶ Export cap: maxPatchSidePx=${maxPatchSidePx}, baseDownsample=${baseDownsample}, padPx=${padPx}"
 
 
 annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
@@ -68,28 +66,21 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
             return
         }
 
-        // ---- Build FULL-RES integer crop bounds with optional padding ----
+        // ---- FULL-RES crop bounds ----
         int x = (int)Math.floor(xD) - padPx
         int y = (int)Math.floor(yD) - padPx
         int w = (int)Math.ceil(wD) + 2 * padPx
         int h = (int)Math.ceil(hD) + 2 * padPx
 
-        // ---- Clamp to image bounds ----
+        // ---- Clamp to image ----
         if (x < 0) { w += x; x = 0 }
         if (y < 0) { h += y; y = 0 }
-        if (x >= fullW || y >= fullH) {
-            println "[${idx + 1} / ${total}] Skipping out-of-image annotation ${idx}"
-            return
-        }
+        if (x >= fullW || y >= fullH) return
         if (x + w > fullW) w = fullW - x
         if (y + h > fullH) h = fullH - y
+        if (w <= 1 || h <= 1) return
 
-        if (w <= 1 || h <= 1) {
-            println "[${idx + 1} / ${total}] Skipping invalid-clamped annotation ${idx}"
-            return
-        }
-
-        // ---- Auto-downsample so exported patch side is <= maxPatchSidePx ----
+        // ---- Auto-downsample ----
         double ds = baseDownsample
         double maxSideFull = Math.max(w, h)
         if (maxSideFull / ds > maxPatchSidePx) {
@@ -100,11 +91,22 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
         int outH = (int)Math.round(h / ds)
 
         if (outW > hardSkipSidePx || outH > hardSkipSidePx) {
-            println "[${idx + 1} / ${total}] Skipping HUGE annotation ${idx} (would export ${outW}x${outH} at ds=${ds})"
+            println "[${idx + 1} / ${total}] Skipping huge annotation ${idx}"
             return
         }
 
-        println "[${idx + 1} / ${total}] ann ${idx} | crop(full)=${w}x${h} @ (${x},${y}) | ds=${ds} -> ${outW}x${outH}"
+        // ---- Class name ----
+        def pathClass = ann.getPathClass()
+        def className = pathClass == null ? "Unclassified" : pathClass.toString()
+        className = className.replaceAll("[^a-zA-Z0-9_-]", "_")
+
+        // ---- Filename ----
+        def baseName =
+            "${imageName}" +
+            "__cls-${className}" +
+            "__x-${x}_y-${y}_w-${w}_h-${h}" +
+            "__ds-${ds as int}" +
+            "__ann-${idx}"
 
         def request = RegionRequest.createInstance(
             server.getPath(),
@@ -117,10 +119,9 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
 
         // ---------- IMAGE ----------
         BufferedImage img = server.readRegion(request)
-        def imgOut = new File(imgDir, "${imageName}_ann_${idx}.png")
-        ImageIO.write(img, "PNG", imgOut)
+        ImageIO.write(img, "PNG", new File(imgDir, baseName + ".png"))
 
-        // ---------- MASK (same size as img) ----------
+        // ---------- MASK ----------
         BufferedImage mask = new BufferedImage(
             img.getWidth(),
             img.getHeight(),
@@ -131,43 +132,27 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
         g2d.setColor(Color.BLACK)
         g2d.fillRect(0, 0, mask.getWidth(), mask.getHeight())
 
-        // Draw ROI shape in crop coordinate system and scaled to downsampled pixels
-        g2d.setColor(Color.WHITE) // 255
+        g2d.setColor(Color.WHITE)
         def shape = roi.getShape()
-
-        // IMPORTANT: order matters. Convert world(full-res) -> crop(full-res) -> downsampled pixels
         g2d.translate(-x, -y)
-        if (ds != 1.0) {
-            g2d.scale(1.0 / ds, 1.0 / ds)
-        }
+        if (ds != 1.0) g2d.scale(1.0 / ds, 1.0 / ds)
         g2d.fill(shape)
         g2d.dispose()
 
         ImagePlus maskImp = new ImagePlus("mask", mask)
-        def maskOut = new File(maskDir, "${imageName}_ann_${idx}.png")
-        IJ.save(maskImp, maskOut.getAbsolutePath())
+        IJ.save(maskImp, new File(maskDir, baseName + ".png").getAbsolutePath())
         maskImp.close()
 
-        // ---------- CLEANUP ----------
         img.flush()
         mask.flush()
 
-        // GC occasionally (not every loop)
-        if ((idx + 1) % 25 == 0) {
-            System.gc()
-        }
+        if ((idx + 1) % 25 == 0) System.gc()
 
-        println "[${idx + 1} / ${total}] Exported annotation ${idx}"
+        println "[${idx + 1} / ${total}] Exported ${baseName}"
 
-    } catch (OutOfMemoryError oom) {
-        println "[${idx + 1} / ${total}] OOM on annotation ${idx} — skipping. Try lowering maxPatchSidePx. Message: ${oom.getMessage()}"
-        // Try to recover a bit
-        System.gc()
-        return
     } catch (Exception e) {
         println "[${idx + 1} / ${total}] ERROR on annotation ${idx}: ${e.getMessage()}"
-        return
     }
 }
 
-println "✅ Done exporting (attempted) ${total} annotations"
+println "✅ Done exporting ${total} annotations"
