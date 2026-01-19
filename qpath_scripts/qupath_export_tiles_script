@@ -7,7 +7,7 @@ def tileSize = 1024
 def downsample = 1.0
 def maxTiles = 10000
 
-def outDir = "C:/Users/chris/Desktop/tiles_test"
+def outDir = "C:/Users/chris/Desktop/AnnotationsTest"
 mkdirs(outDir)
 
 int width = server.getWidth()
