@@ -2,6 +2,8 @@
 Connect via ssh using 
 ssh ccharlesworth@login.daic.tudelft.nl
 
+/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
+
 
 Copy a file from computer to DAIC
 $ scp make_env_job.sh ccharlesworth@login.daic.tudelft.nl:~/test_code/

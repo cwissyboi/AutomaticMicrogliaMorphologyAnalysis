@@ -77,7 +77,7 @@ def export_calculated_masks(
     """
 
     root_dir = Path(root_dir)
-    out_root = root_dir / "Segmentations" / output_root_name
+    out_root = root_dir / output_root_name
 
     for _, row in df.iterrows():
         scan = row["scan"]
