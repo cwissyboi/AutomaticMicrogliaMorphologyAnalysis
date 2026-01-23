@@ -221,11 +221,46 @@ def connect_components_geodesic_similarity(
     return connected_mask.astype(np.uint8)
 
 
+def remove_blue_pixels(mask, image, hue_range=(90, 140), min_saturation=0.1):
+    """
+    Remove mask pixels that are strongly blue.
+
+    Parameters
+    ----------
+    mask : np.ndarray (H, W), uint8
+        Binary mask (0/1)
+    image : np.ndarray (H, W, 3), uint8 RGB
+    hue_range : tuple
+        Hue range (OpenCV scale 0–179) considered blue
+    min_saturation : float
+        Minimum saturation to consider a pixel colored
+
+    Returns
+    -------
+    cleaned_mask : np.ndarray (H, W), uint8
+    """
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+    h = hsv[..., 0]
+    s = hsv[..., 1] / 255.0
+
+    blue = (
+        (h >= hue_range[0]) &
+        (h <= hue_range[1]) &
+        (s >= min_saturation)
+    )
+
+    cleaned_mask = mask.copy()
+    cleaned_mask[blue] = 0
+
+    return cleaned_mask
+
 
 def compute_mask_otsu_inside_annotation(
     image_path,
     mask_path,
     connect_components=True,
+    remove_blue = True, 
 ):
     image = np.array(Image.open(image_path).convert("RGB"))
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -244,8 +279,12 @@ def compute_mask_otsu_inside_annotation(
 
     mask = (thresh & orig_mask).astype(np.uint8)
 
+    if remove_blue: 
+        mask = remove_blue_pixels(mask, image)
+
     if connect_components:
         mask = connect_components_geodesic_similarity(mask, image = image)
+    
 
     return mask
 
