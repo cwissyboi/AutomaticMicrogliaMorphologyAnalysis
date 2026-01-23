@@ -6,48 +6,62 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
 
-def compute_similarity_cost_rgb(image):
+
+def compute_color_preference_cost_rgb(
+    image,
+    white_penalty=10.0,
+    color_weight=1.0,
+):
+    """
+    Low cost on brown/red pixels, high cost on white background.
+    """
+    img = image.astype(np.float32) / 255.0
+
+    R = img[..., 0]
+    G = img[..., 1]
+    B = img[..., 2]
+
+    # --- Red / brown heuristic ---
+    # Brown/red ≈ high R, moderate G, low B
+    redness = R - 0.5 * G - 0.5 * B
+    redness = np.clip(redness, 0, 1)
+
+    # Convert to cost (prefer red)
+    color_cost = 1.0 - redness
+
+    # --- Penalize white ---
+    brightness = (R + G + B) / 3.0
+    white_cost = (brightness ** 2) * white_penalty
+
+    cost = color_weight * color_cost + white_cost
+    cost += 1e-3
+
+    # return cost / (cost.max() + 1e-6)
+    return cost
+
+def compute_smoothness_cost(image):
     img = image.astype(np.float32)
 
-    dx = np.linalg.norm(
-        img[:, 1:] - img[:, :-1],
-        axis=-1
-    )
+    dx = np.linalg.norm(img[:, 1:] - img[:, :-1], axis=-1)
     dx = np.pad(dx, ((0, 0), (1, 0)))
 
-    dy = np.linalg.norm(
-        img[1:, :] - img[:-1, :],
-        axis=-1
-    )
+    dy = np.linalg.norm(img[1:, :] - img[:-1, :], axis=-1)
     dy = np.pad(dy, ((1, 0), (0, 0)))
 
-    cost = dx + dy
-    cost = cost / (cost.max() + 1e-6)
-    cost += 1e-3
-
-    return cost
+    smooth = dx + dy
+    return smooth / (smooth.max() + 1e-6)
 
 
-def compute_similarity_cost_gray(gray, white_penalty=10.0):
-    gray = gray.astype(np.float32)
+def extract_components(labels, min_area_px):
+    components = {}
+    for label in np.unique(labels):
+        if label == 0:
+            continue
+        ys, xs = np.where(labels == label)
+        if len(xs) >= min_area_px:
+            components[label] = np.column_stack([ys, xs])
+    return components
 
-    dx = np.abs(gray[:, 1:] - gray[:, :-1])
-    dx = np.pad(dx, ((0, 0), (1, 0)))
-
-    dy = np.abs(gray[1:, :] - gray[:-1, :])
-    dy = np.pad(dy, ((1, 0), (0, 0)))
-
-    similarity = dx + dy
-    similarity = similarity / (similarity.max() + 1e-6)
-
-    # Penalize bright pixels (white background)
-    brightness = gray / 255.0
-    brightness_penalty = 1.0 + white_penalty * (brightness ** 2)
-
-    cost = similarity * brightness_penalty
-    cost += 1e-3
-
-    return cost
 
 
 def draw_thick_path(
@@ -89,7 +103,6 @@ def keep_largest_component(binary_mask):
 
     return (labels == max_label).astype(np.uint8)
 
-
 def connect_components_geodesic_similarity(
     binary_mask,
     image,
@@ -98,61 +111,93 @@ def connect_components_geodesic_similarity(
     thickness_scale=1.0,
     max_radius=12,
 ):
-    connected_mask = binary_mask.copy()
+    """
+    Connect components by greedily attaching the closest component
+    to the current main (largest) component, updating distances after
+    each merge.
+    """
 
     H, W = binary_mask.shape
     image_area = H * W
     min_area_px = min_component_frac * image_area
 
+    # --- Label components ---
     num_labels, labels = cv2.connectedComponents(binary_mask)
     if num_labels <= 2:
-        return connected_mask
+        return binary_mask.astype(np.uint8)
 
-    # --- Cost computation ---
-    if image.ndim == 3:
-        cost = compute_similarity_cost_rgb(image)
-    elif image.ndim == 2:
-        cost = compute_similarity_cost_gray(image)
-    else:
-        raise ValueError(f"Unsupported image shape: {image.shape}")
+    # --- Compute cost map ---
+    color_cost = compute_color_preference_cost_rgb(
+        image,
+        white_penalty=1000.0,
+        color_weight=1.0,
+    )
+    smooth_cost = compute_smoothness_cost(image)
+    cost = color_cost + 0.1 * smooth_cost
+
 
     if restrict_to_mask:
-        penalty = cost.max() * 10
-        cost[~binary_mask.astype(bool)] += penalty
+        cost = cost.copy()
+        cost[~binary_mask.astype(bool)] += cost.max() * 10
 
-    # --- Thickness estimation ---
+    # --- Thickness map ---
     thickness_map = distance_transform_edt(binary_mask) * thickness_scale
 
-    # --- Collect large components ---
-    components = []
+    # --- Extract valid components ---
+    components = {}
     for label in range(1, num_labels):
         ys, xs = np.where(labels == label)
-        area = len(xs)
+        if len(xs) >= min_area_px:
+            components[label] = np.column_stack([ys, xs])
 
-        if area < min_area_px:
-            continue
+    if len(components) <= 1:
+        return keep_largest_component(binary_mask).astype(np.uint8)
 
-        cy = int(np.mean(ys))
-        cx = int(np.mean(xs))
-        components.append((cy, cx))
+    # --- Find largest component (main/root) ---
+    areas = {label: len(pixels) for label, pixels in components.items()}
+    main_label = max(areas, key=areas.get)
 
-    # Nothing to connect
-    if len(components) < 2:
-        # Still enforce single component
-        return keep_largest_component(connected_mask)
+    main_mask = (labels == main_label).astype(np.uint8)
+    connected_mask = main_mask.copy()
 
-    # Sort components spatially
-    components = sorted(components, key=lambda p: (p[1], p[0]))
+    remaining = set(components.keys())
+    remaining.remove(main_label)
 
-    # --- Connect components ---
-    for i in range(len(components) - 1):
-        start = components[i]
-        end = components[i + 1]
+    # --- Greedy nearest-to-main loop ---
+    while remaining:
+        # Distance to current main component
+        dist_to_main = distance_transform_edt(1 - main_mask)
 
+        best_label = None
+        best_dist = np.inf
+        best_point_other = None
+
+        # Find closest remaining component
+        for label in remaining:
+            pixels = components[label]
+            dists = dist_to_main[pixels[:, 0], pixels[:, 1]]
+            idx = np.argmin(dists)
+
+            if dists[idx] < best_dist:
+                best_dist = dists[idx]
+                best_label = label
+                best_point_other = tuple(pixels[idx])
+
+        # Closest point in main component
+        main_pixels = np.column_stack(np.where(main_mask))
+        main_idx = np.argmin(
+            np.linalg.norm(
+                main_pixels - np.array(best_point_other),
+                axis=1
+            )
+        )
+        best_point_main = tuple(main_pixels[main_idx])
+
+        # --- Geodesic path ---
         path, _ = route_through_array(
             cost,
-            start,
-            end,
+            best_point_main,
+            best_point_other,
             fully_connected=True
         )
 
@@ -164,10 +209,17 @@ def connect_components_geodesic_similarity(
             max_radius=max_radius,
         )
 
-    # --- FINAL CLEANUP: keep only one connected component ---
-    connected_mask = keep_largest_component(connected_mask)
+        # --- Merge into main component ---
+        main_mask = np.maximum(main_mask, connected_mask)
+        main_mask[labels == best_label] = 1
+
+        remaining.remove(best_label)
+
+    # --- Final cleanup ---
+    connected_mask = keep_largest_component(main_mask)
 
     return connected_mask.astype(np.uint8)
+
 
 
 def compute_mask_otsu_inside_annotation(
@@ -193,7 +245,7 @@ def compute_mask_otsu_inside_annotation(
     mask = (thresh & orig_mask).astype(np.uint8)
 
     if connect_components:
-        mask = connect_components_geodesic_similarity(mask, gray)
+        mask = connect_components_geodesic_similarity(mask, image = image)
 
     return mask
 
