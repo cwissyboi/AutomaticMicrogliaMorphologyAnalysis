@@ -11,6 +11,11 @@ $ scp make_env_job.sh ccharlesworth@login.daic.tudelft.nl:~/test_code/
 Copy a folder from computer to DAIC
 scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 
+scp -r AnnotationsData ccharlesworth@login.daic.tudelft.nl:~/AutomaticMicrogliaMorphologyAnalysis
+
+scp -r initial_pipeline ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
+
+
 Remove a file 
 rm filename
 

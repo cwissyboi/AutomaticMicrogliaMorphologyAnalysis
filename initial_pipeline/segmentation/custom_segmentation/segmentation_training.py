@@ -242,11 +242,11 @@ def main():
     # Only segment the entire cell ie. not just the SOMA
     path_df = path_df[path_df['class'] == 'MG_whole']
     # Remove all bad annotations
-    path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree', 'medium'])]
+    path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 100 for now to train fast
-    path_df = path_df.head(160)
+    # path_df = path_df.head(160)
     print(len(path_df), "annotation pairs found")
 
 
@@ -291,13 +291,14 @@ def main():
     # criterion = DiceLoss()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f'currently using device: {device}')
 
     model = UNet().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     
 
         
-    epochs = 2
+    epochs = 10
 
     for epoch in trange(epochs, desc="Training", unit="epoch"):
         train_loss = train_epoch(model, train_loader, device = device, optimizer = optimizer, criterion = criterion)
