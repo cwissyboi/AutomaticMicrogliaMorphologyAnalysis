@@ -246,7 +246,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 100 for now to train fast
-    # path_df = path_df.head(160)
+    path_df = path_df.head(160)
     print(len(path_df), "annotation pairs found")
 
 

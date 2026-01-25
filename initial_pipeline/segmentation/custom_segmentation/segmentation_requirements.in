@@ -1,0 +1,22 @@
+# Core scientific stack
+numpy
+pandas
+scipy
+scikit-image
+scikit-learn
+matplotlib
+pillow
+
+# Computer vision
+opencv-python
+
+# Deep learning (CUDA handled separately, see note below)
+# torch
+# torchvision
+# torchaudio
+
+# Data augmentation
+albumentations
+
+# Utilities
+tqdm

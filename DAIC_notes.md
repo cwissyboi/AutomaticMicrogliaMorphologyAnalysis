@@ -11,10 +11,16 @@ $ scp make_env_job.sh ccharlesworth@login.daic.tudelft.nl:~/test_code/
 Copy a folder from computer to DAIC
 scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 
-scp -r AnnotationsData ccharlesworth@login.daic.tudelft.nl:~/AutomaticMicrogliaMorphologyAnalysis
 
-scp -r initial_pipeline ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
+scp -r AnnotationsData ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
+
+scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/
+
+
+scp segmentation_requirements.in ccharlesworth@login.daic.tudelft.nl:~/
+
+/tudelft.net/staff-umbrella/StudentsCVlab/
 
 Remove a file 
 rm filename
@@ -69,11 +75,35 @@ pip install --no-cache-dir pandas
 pip install --no-cache-dir -r initial_pipeline_requirements.txt
 
 Create conda environment in the home directory
-conda create --prefix ./myenv python=3.12
-conda activate ./myenv
+module use /opt/insy/modulefiles
+module load miniconda/3.11
+conda create --prefix ./segmentation_venv python=3.10
+conda create --prefix ./segmentation_conda python=3.10
 
+
+pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+before pip installing the requirements
+
+
+conda activate ./segmentation_venv
+
+
+module load miniconda/3.11
+conda create -n segmentation_venv python=3.10 pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -c conda-forge
+conda activate segmentation_venv
+
+conda create --prefix ./segmentation_conda python=3.10
 
 
 
 DELFT BLUE 
 ssh ccharlesworth@login.delftblue.tudelft.nl
+
+/home/nfs/ccharlesworth/segmentation_conda
+
+
+no deps means only install this.
+pip install pandas==2.1.4 --no-deps
+
+
+pip install pand==2.1.4 --no-deps
