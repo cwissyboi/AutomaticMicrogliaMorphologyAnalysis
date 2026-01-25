@@ -159,7 +159,8 @@ def visualize_predictions(
 
     logits = model(x)
     probs = torch.sigmoid(logits)
-    preds = (probs > threshold).float()
+    # preds = (probs > threshold).float()
+    preds = probs.float()
 
     for i in range(min(num_samples, x.size(0))):
         img = x[i].cpu().permute(1, 2, 0)
@@ -317,8 +318,8 @@ def main():
     
 
         
-    max_epochs = 30
-    patience = 5
+    max_epochs = 40
+    patience = 10
 
     best_dice = -float("inf")
     best_epoch = -1

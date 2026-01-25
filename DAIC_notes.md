@@ -40,6 +40,7 @@ sbatch job_file.sh
 squeue - check the status of jobs on the system
 scancel - cancel a job and delete it from the queue
 
+scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints/best_run_25_1.pth ./
 
 
 Links 
