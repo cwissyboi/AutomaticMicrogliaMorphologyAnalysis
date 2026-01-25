@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=general
 #SBATCH --qos=short
-#SBATCH --time=0:10:00
+#SBATCH --time=0:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python segmentation_training.py
+srun python -u segmentation_training.py

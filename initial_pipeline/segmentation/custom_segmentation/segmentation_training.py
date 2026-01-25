@@ -246,19 +246,36 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 100 for now to train fast
-    path_df = path_df.head(160)
+    # path_df = path_df.head(160)
     print(len(path_df), "annotation pairs found")
 
 
 
-    train_df, test_df = train_test_split(
+    # train_df, test_df = train_test_split(
+    #     path_df,
+    #     test_size=0.2,
+    #     random_state=42,
+    #     shuffle=True
+    # )
+
+        # First split: train + temp (val+test)
+    train_df, temp_df = train_test_split(
         path_df,
-        test_size=0.2,
+        test_size=0.3,        # 70% train, 30% temp
         random_state=42,
         shuffle=True
     )
 
-    print(len(train_df), len(test_df))
+    # Second split: val + test
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=0.5,        # 15% val, 15% test
+        random_state=42,
+        shuffle=True
+    )
+
+    print('Training, validatoin and testing sizes')
+    print(len(train_df), len(val_df), len(test_df))
 
 
     
@@ -279,12 +296,14 @@ def main():
 
     train_ds = SegmentationDataset(train_df, train_tfms)
     test_ds  = SegmentationDataset(test_df, test_tfms)
+    val_ds = SegmentationDataset(val_df, test_tfms)
+
     # train_ds = SegmentationDataset(train_df)
     # test_ds  = SegmentationDataset(test_df)
 
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True, num_workers=0)
     test_loader  = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=0)
-
+    val_loader   = DataLoader(val_ds,   batch_size=16, shuffle=False, num_workers=0)
 
     
     criterion = nn.BCEWithLogitsLoss()
@@ -298,21 +317,51 @@ def main():
     
 
         
-    epochs = 10
+    max_epochs = 30
+    patience = 5
 
-    for epoch in trange(epochs, desc="Training", unit="epoch"):
+    best_dice = -float("inf")
+    best_epoch = -1
+    epochs_no_improve = 0
+
+    for epoch in trange(max_epochs, desc="Training", unit="epoch"):
         train_loss = train_epoch(model, train_loader, device = device, optimizer = optimizer, criterion = criterion)
-        metrics = evaluate(model, test_loader, device = device)
+        test_metrics = evaluate(model, test_loader, device = device)
+        val_metrics = evaluate(model, val_loader, device = device)
+
+        current_dice = val_metrics["dice"]
+
+        # Check improvement
+        if current_dice > best_dice:
+            best_dice = current_dice
+            best_epoch = epoch
+            epochs_no_improve = 0
+
+            # Save best model
+            save_model_with_timestamp(model)
+
+            status = "NEW BEST"
+        else:
+            epochs_no_improve += 1
+            status = f"no improve ({epochs_no_improve}/{patience})"
 
         tqdm.write(
             f"Epoch {epoch:03d} | "
             f"Loss: {train_loss:.4f} | "
-            f"Dice: {metrics['dice']:.4f} | "
-            f"IoU: {metrics['iou']:.4f}"
+            f"Validation Dice: {current_dice:.4f} | "
+            f"Validation IoU: {val_metrics['iou']:.4f} | "
+            f"Test Dice: {test_metrics['dice']:.4f} | "
+            f"Test IoU: {test_metrics['iou']:.4f} | "
+            f"{status}"
         )
 
-    # Save model
-    save_model_with_timestamp(model)
+        # Early stopping
+        if epochs_no_improve >= patience:
+            tqdm.write(
+                f"Early stopping at epoch {epoch}. "
+                f"Best Dice {best_dice:.4f} at epoch {best_epoch}."
+            )
+            break
 
 
 if __name__ == "__main__":
