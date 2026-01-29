@@ -21,13 +21,15 @@ import cv2
 from segmentation_preprocessing import preprocess_segmentations
 from random_disconnections.disconnect_components import disconnect_branches_with_gap
 from random_disconnections.find_connection_points import find_random_branch_points
+from random_disconnections.random_colour_noise import add_floating_synthetic_fragments
 
 
 class SegmentationDataset(Dataset):
-    def __init__(self, df, transform=None, disconnect_components = True):
+    def __init__(self, df, transform=None, disconnect_components = True, add_new_components = True):
         self.df = df.reset_index(drop=True)
         self.transform = transform
         self.disconnect_components = disconnect_components
+        self.add_new_components = add_new_components
 
     def __len__(self):
         return len(self.df)
@@ -65,12 +67,18 @@ class SegmentationDataset(Dataset):
                 mask_path,
                 points, 
                 box_size = box_size,
-                blur_output = True
+                blur_output = True, 
+                blur_feather_radius=1
             )
             
             # swap order of colours to make it consitent with the code below
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        if self.add_new_components: 
+            image = add_floating_synthetic_fragments(
+                    image,
+                    mask
+                )
 
 
         if self.transform:
@@ -234,7 +242,7 @@ def main():
     path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
 
     # path_df = path_df.merg(mask_quality_df, on = )
-    # Only take first 100 for now to train fast
+    # Only take first 160 for now to train fast
     # path_df = path_df.head(160)
     print(len(path_df), "annotation pairs found")
 
@@ -283,9 +291,9 @@ def main():
 
 
 
-    train_ds = SegmentationDataset(train_df, train_tfms)
-    test_ds  = SegmentationDataset(test_df, test_tfms)
-    val_ds = SegmentationDataset(val_df, test_tfms)
+    train_ds = SegmentationDataset(train_df, train_tfms, disconnect_components=True)
+    test_ds  = SegmentationDataset(test_df, test_tfms, disconnect_components=False)
+    val_ds = SegmentationDataset(val_df, test_tfms, disconnect_components=False)
 
     # train_ds = SegmentationDataset(train_df)
     # test_ds  = SegmentationDataset(test_df)
@@ -306,7 +314,7 @@ def main():
     
 
         
-    max_epochs = 40
+    max_epochs = 100
     patience = 10
 
     best_dice = -float("inf")
