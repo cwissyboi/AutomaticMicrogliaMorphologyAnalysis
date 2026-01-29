@@ -16,3 +16,4 @@ initial_pipeline/segmentation/custom_segmentation/__pycache__
 initial_pipeline/segmentation/custom_segmentation/checkpoints
 AnnotationsData
 segmentation_venv
+initial_pipeline/segmentation/custom_segmentation/random_disconnections/__pycache__
