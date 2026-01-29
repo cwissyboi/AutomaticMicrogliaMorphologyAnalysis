@@ -104,6 +104,8 @@ def visualize_first_n_with_branch_cuts(
             blur_output = blur_output
         )
 
+        print(type(image_cut))
+
         # --- convert to RGB for plotting ---
         image_cut_rgb = cv2.cvtColor(image_cut, cv2.COLOR_BGR2RGB)
 

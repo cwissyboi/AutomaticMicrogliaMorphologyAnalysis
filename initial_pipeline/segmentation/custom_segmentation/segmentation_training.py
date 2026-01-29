@@ -17,13 +17,17 @@ import torch
 from tqdm import trange, tqdm
 import matplotlib.pyplot as plt
 import torch
+import cv2
 from segmentation_preprocessing import preprocess_segmentations
+from random_disconnections.disconnect_components import disconnect_branches_with_gap
+from random_disconnections.find_connection_points import find_random_branch_points
 
 
 class SegmentationDataset(Dataset):
-    def __init__(self, df, transform=None):
+    def __init__(self, df, transform=None, disconnect_components = True):
         self.df = df.reset_index(drop=True)
         self.transform = transform
+        self.disconnect_components = disconnect_components
 
     def __len__(self):
         return len(self.df)
@@ -40,6 +44,34 @@ class SegmentationDataset(Dataset):
 
         # Normalize mask to {0,1}
         mask = (mask > 0).astype(np.float32)
+
+        # Override the image variables above if you want random changes
+        if (self.disconnect_components): 
+            
+            points = find_random_branch_points(
+                image_path=img_path, 
+                mask_path = mask_path, 
+                points_per_branch=5, 
+                min_branch_length=10
+            )
+
+            H, W = image.shape[:2]
+            box_size = int(0.1 * H)   # 10% of image height
+
+
+            # --- cut branches locally ---
+            image, _ = disconnect_branches_with_gap(
+                img_path,
+                mask_path,
+                points, 
+                box_size = box_size,
+                blur_output = True
+            )
+            
+            # swap order of colours to make it consitent with the code below
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+
 
         if self.transform:
             augmented = self.transform(image=image, mask=mask)

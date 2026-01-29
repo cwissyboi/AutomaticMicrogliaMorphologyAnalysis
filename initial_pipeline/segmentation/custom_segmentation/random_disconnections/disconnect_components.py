@@ -105,6 +105,7 @@ def disconnect_branches_with_gap(
     points_xy,
     box_size=15,
     blur_output=True, 
+    blur_feather_radius = 10,
     replace_full_box = True
 ):
     image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -160,7 +161,7 @@ def disconnect_branches_with_gap(
                 image=image,
                 image_modified=image_out,
                 x0=x0, y0=y0, x1=x1, y1=y1,
-                feather_radius=20
+                feather_radius = blur_feather_radius 
             )
 
     return image_out, mask_out
