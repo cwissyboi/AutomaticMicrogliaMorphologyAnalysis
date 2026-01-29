@@ -144,50 +144,6 @@ def evaluate(model, loader, device):
     }
 
 
-@torch.no_grad()
-def visualize_predictions(
-    model,
-    loader,
-    device,
-    num_samples=3,
-    threshold=0.5
-):
-    model.eval()
-
-    x, y = next(iter(loader))
-    x, y = x.to(device), y.to(device)
-
-    logits = model(x)
-    probs = torch.sigmoid(logits)
-    # preds = (probs > threshold).float()
-    preds = probs.float()
-
-    for i in range(min(num_samples, x.size(0))):
-        img = x[i].cpu().permute(1, 2, 0)
-        gt  = y[i, 0].cpu()
-        pr  = preds[i, 0].cpu()
-
-        plt.figure(figsize=(12, 4))
-
-        plt.subplot(1, 3, 1)
-        plt.imshow(img)
-        plt.title("Input image")
-        plt.axis("off")
-
-        plt.subplot(1, 3, 2)
-        plt.imshow(gt, cmap="gray")
-        plt.title("Ground truth")
-        plt.axis("off")
-
-        plt.subplot(1, 3, 3)
-        plt.imshow(pr, cmap="gray")
-        plt.title("Prediction")
-        plt.axis("off")
-
-        plt.tight_layout()
-        plt.show()
-
-
 
 
 def save_model_with_timestamp(model):
