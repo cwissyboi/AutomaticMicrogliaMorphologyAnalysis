@@ -44,22 +44,16 @@ def parse_segmentation_args():
         description="Train UNet segmentation model"
     )
 
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed")
-
-    parser.add_argument("--folds", type=int, default=5,
-                        help="Number of CV folds")
-
     parser.add_argument("--epochs", type=int, default=100,
                         help="Max training epochs")
 
     parser.add_argument("--patience", type=int, default=10,
                         help="Early stopping patience")
-
-    parser.add_argument("--lr", type=float, default=1e-4,
-                        help="Learning rate")
-
-    parser.add_argument("--batch-size", type=int, default=16,
-                        help="Batch size")
-
+    
+    parser.add_argument("--disconnect_components", type=bool, default=False,
+                    help="Early stopping patience")
+    
+    parser.add_argument("--add_new_components", type=bool, default=False,
+                    help="Early stopping patience")
+    
     return parser.parse_args()

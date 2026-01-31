@@ -82,6 +82,12 @@ def evaluate(model, loader, device):
 # Visualize predictions
 
 def main(): 
+    args = parse_segmentation_args()
+
+    print('arg value')
+    disconnect_components = args.disconnect_components
+    add_new_components = args.add_new_components
+    print(args)
 
     set_seed(42)
     print('preparing segmentations')
@@ -160,8 +166,8 @@ def main():
 
         train_ds = SegmentationDataset(
             train_df, train_tfms,
-            disconnect_components=False,
-            add_new_components=False
+            disconnect_components=disconnect_components,
+            add_new_components=add_new_components
         )
 
         val_ds = SegmentationDataset(
@@ -211,7 +217,7 @@ def main():
                 best_epoch = epoch
                 epochs_no_improve = 0
 
-                # 🔹 store BEST model weights in memory
+                # store BEST model weights in memory
                 best_state_dict = {
                     k: v.detach().cpu().clone()
                     for k, v in model.state_dict().items()

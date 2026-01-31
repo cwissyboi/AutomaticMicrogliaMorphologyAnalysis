@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
-#SBATCH --output=run_segmentation.out
-#SBATCH --error=run_segmentation.err
+#SBATCH --output=run_segmentation_add_new_components.out
+#SBATCH --error=run_segmentation_add_new_components.err
 #SBATCH --mail-type=END
 
 module use /opt/insy/modulefiles
@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python -u segmentation_training.py
+srun python -u segmentation_training.py --add_new_components False
