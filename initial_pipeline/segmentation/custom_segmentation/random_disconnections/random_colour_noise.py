@@ -41,33 +41,92 @@ def compute_mean_foreground_color(image, mask01):
     return mean_color.astype(np.uint8)
 
 
+import numpy as np
+import cv2
+
+def compute_branch_color(
+    image,
+    mask01,
+    branch_dist_frac=0.35,
+    percentile=70,
+    fallback_color=(165, 120, 95)
+):
+    """
+    Estimate the RGB colour of cell branches (excluding soma).
+
+    Parameters
+    ----------
+    image : np.ndarray (H, W, 3), uint8
+        RGB image
+    mask01 : np.ndarray (H, W), binary {0,1}
+        Foreground mask
+    branch_dist_frac : float
+        Fraction of max distance transform used to define branches.
+        Smaller = thinner structures.
+    percentile : int
+        Percentile of colour distribution to return (robust to noise).
+    fallback_color : tuple
+        Used if branch pixels cannot be reliably detected.
+
+    Returns
+    -------
+    branch_color : np.ndarray (3,), uint8
+    """
+
+    # --- distance transform inside the mask ---
+    dt = cv2.distanceTransform(
+        (mask01 > 0).astype(np.uint8),
+        cv2.DIST_L2,
+        5
+    )
+
+    max_dt = dt[mask01 > 0].max() if mask01.any() else 0
+    if max_dt <= 0:
+        return np.array(fallback_color, dtype=np.uint8)
+
+    # --- thin regions = branches ---
+    branch_mask = (dt > 0) & (dt <= branch_dist_frac * max_dt)
+
+    branch_pixels = image[branch_mask]
+
+    if branch_pixels.shape[0] < 20:
+        # not enough samples → fallback
+        return np.array(fallback_color, dtype=np.uint8)
+
+    # robust colour estimate
+    branch_color = np.percentile(branch_pixels, percentile, axis=0)
+
+    return branch_color.astype(np.uint8)
+
+
+
 
 import cv2
 import numpy as np
+
 def add_floating_synthetic_fragments(
     image,
     mask01,
-    num_objects=(1, 4),
-    branch_length=(10, 50),
+    num_objects=(1, 2),
+    branch_length=(5, 30),
     thickness=2,
-    color_jitter=3,          # keep small now
+    color_jitter=2,
     min_dist_to_mask=40,
-    max_tries=100
+    max_tries=100,
+    brightness_range=(0.75, 1.15), 
 ):
     """
     Add floating synthetic cell-like fragments to an image,
-    using the mean foreground colour, and keeping distance
-    from the ground-truth mask.
+    with smooth light→dark colour variation along each branch.
     """
 
     H, W, _ = image.shape
     image_out = image.copy()
 
-    # --- compute mean foreground colour ONCE ---
-    # base_color = compute_mean_foreground_color(image, mask01).astype(np.int32)
-    base_color = (255, 0, 0)
+    # Base branch colour (RGB)
+    base_color = compute_branch_color(image, mask01).astype(np.float32)
 
-    # distance map from ground truth mask
+    # Distance map from GT mask
     dist = cv2.distanceTransform(
         (1 - mask01).astype(np.uint8),
         cv2.DIST_L2,
@@ -89,8 +148,13 @@ def add_floating_synthetic_fragments(
         length = np.random.randint(*branch_length)
         branch = generate_floating_branch((x, y), length)
 
-        # --- draw branch ---
-        for i in range(len(branch) - 1):
+        # --- sample brightness gradient for this branch ---
+        start_b = np.random.uniform(*brightness_range)
+        end_b   = np.random.uniform(*brightness_range)
+
+        L = max(1, len(branch) - 1)
+
+        for i in range(L):
             x0, y0 = branch[i]
             x1, y1 = branch[i + 1]
 
@@ -99,12 +163,17 @@ def add_floating_synthetic_fragments(
             if dist[y0, x0] < min_dist_to_mask:
                 break
 
-            # small jitter around global foreground colour
+            # smooth brightness interpolation
+            t = i / max(1, L - 1)
+            brightness = (1 - t) * start_b + t * end_b
+
+            # tiny jitter to avoid flatness
             jitter = np.random.randint(
                 -color_jitter, color_jitter + 1, size=3
             )
 
-            color = np.clip(base_color + jitter, 0, 255).astype(np.uint8)
+            color = base_color * brightness + jitter
+            color = np.clip(color, 0, 255).astype(np.uint8)
 
             cv2.line(
                 image_out,

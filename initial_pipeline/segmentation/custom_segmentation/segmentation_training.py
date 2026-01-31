@@ -22,6 +22,17 @@ from segmentation_preprocessing import preprocess_segmentations
 from random_disconnections.disconnect_components import disconnect_branches_with_gap
 from random_disconnections.find_connection_points import find_random_branch_points
 from random_disconnections.random_colour_noise import add_floating_synthetic_fragments
+import random
+
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 class SegmentationDataset(Dataset):
@@ -59,7 +70,6 @@ class SegmentationDataset(Dataset):
 
             H, W = image.shape[:2]
             box_size = int(0.1 * H)   # 10% of image height
-
 
             # --- cut branches locally ---
             image, _ = disconnect_branches_with_gap(
@@ -214,6 +224,7 @@ def save_model_with_timestamp(model):
 
 def main(): 
 
+    set_seed(42)
     print('preparing segmentations')
     preprocess_segmentations()
 
@@ -291,9 +302,9 @@ def main():
 
 
 
-    train_ds = SegmentationDataset(train_df, train_tfms, disconnect_components=True)
-    test_ds  = SegmentationDataset(test_df, test_tfms, disconnect_components=False)
-    val_ds = SegmentationDataset(val_df, test_tfms, disconnect_components=False)
+    train_ds = SegmentationDataset(train_df, train_tfms, disconnect_components=False, add_new_components=True)
+    test_ds  = SegmentationDataset(test_df, test_tfms, disconnect_components=False, add_new_components=False)
+    val_ds = SegmentationDataset(val_df, test_tfms, disconnect_components=False, add_new_components=False)
 
     # train_ds = SegmentationDataset(train_df)
     # test_ds  = SegmentationDataset(test_df)
