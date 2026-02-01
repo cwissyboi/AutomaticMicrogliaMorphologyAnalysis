@@ -7,7 +7,7 @@
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
 #SBATCH --output=run_segmentation.out
-#SBATCH --error=run_segmentation.err
+#SBATCH --error=.err
 #SBATCH --mail-type=END
 
 module use /opt/insy/modulefiles
