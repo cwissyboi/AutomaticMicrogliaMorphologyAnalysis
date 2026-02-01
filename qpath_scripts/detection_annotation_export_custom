@@ -11,15 +11,15 @@ ImageIO.setUseCache(false)
 
 // ================= USER SETTINGS =================
 def outDir = "C:/Users/chris/Desktop/YOLO_dataset"
-def splitName = "train"          // "train" or "val"
-def patchSize = 512              // patch size in *full-res pixels*
-def downsample = 1.0             // 1.0 = full resolution
-def defaultClassId = 0           // single-class default
+def splitName = "train"
+def patchSize = 512
+def downsample = 1.0
 
-// Optional multi-class mapping by QuPath class name
-// def classMap = ["MG whole":0, "MG cell body":1, "Cluster": 2, "Dirt" : 3]
-def classMap = ["MG whole":0]
+// ---- SINGLE CLASS CONFIG ----
+def TARGET_CLASS_NAME = "MG whole"   // must match QuPath class name exactly
+def TARGET_CLASS_ID   = 0            // YOLO class id
 // ================================================
+
 
 // --------------------------------------------------
 // Setup output folders
@@ -28,6 +28,7 @@ def imagesDir = buildFilePath(outDir, "images", splitName)
 def labelsDir = buildFilePath(outDir, "labels", splitName)
 mkdirs(imagesDir)
 mkdirs(labelsDir)
+
 
 // --------------------------------------------------
 // Access image + annotations
@@ -40,12 +41,17 @@ def imageName = getProjectEntry().getImageName()
 int fullW = server.getWidth()
 int fullH = server.getHeight()
 
-def annotations = hierarchy.getAnnotationObjects()
-println "▶ Found ${annotations.size()} annotations"
+// ---- FILTER ANNOTATIONS ONCE (CRITICAL) ----
+def annotations = hierarchy.getAnnotationObjects().findAll { ann ->
+    def pc = ann.getPathClass()
+    pc != null && pc.getName() == TARGET_CLASS_NAME
+}
+
+println "▶ Found ${annotations.size()} annotations of class '${TARGET_CLASS_NAME}'"
 
 // Output image size in pixels after downsample
 int outPatchSize = (int)Math.round(patchSize / downsample)
-println "▶ Export patch: ${patchSize} (full-res) → ${outPatchSize} (output px)"
+
 
 // --------------------------------------------------
 // Helper: compute centered patch (x,y) in full-res
@@ -57,7 +63,6 @@ def getPatchXYCentered = { ROI roi ->
     int x = (int)Math.round(cx - patchSize / 2.0)
     int y = (int)Math.round(cy - patchSize / 2.0)
 
-    // Clamp to image bounds
     if (x < 0) x = 0
     if (y < 0) y = 0
     if (x + patchSize > fullW) x = fullW - patchSize
@@ -66,8 +71,9 @@ def getPatchXYCentered = { ROI roi ->
     return [x, y]
 }
 
+
 // --------------------------------------------------
-// Helper: bounding-box intersection test (full-res)
+// Helper: bounding-box intersection test
 // --------------------------------------------------
 def intersectsPatch = { ROI roi, int px, int py ->
     double ax1 = roi.getBoundsX()
@@ -75,13 +81,10 @@ def intersectsPatch = { ROI roi, int px, int py ->
     double ax2 = ax1 + roi.getBoundsWidth()
     double ay2 = ay1 + roi.getBoundsHeight()
 
-    double px1 = px
-    double py1 = py
-    double px2 = px + patchSize
-    double py2 = py + patchSize
-
-    return (ax1 < px2 && ax2 > px1 && ay1 < py2 && ay2 > py1)
+    return (ax1 < px + patchSize && ax2 > px &&
+            ay1 < py + patchSize && ay2 > py)
 }
+
 
 // --------------------------------------------------
 // Step 1: build unique patch locations
@@ -97,6 +100,7 @@ for (PathAnnotationObject ann : annotations) {
 
 println "▶ Unique patches to export: ${patchKeys.size()}"
 
+
 // --------------------------------------------------
 // Step 2: export patches + YOLO labels
 // --------------------------------------------------
@@ -108,7 +112,6 @@ for (String key : patchKeys) {
     int px = parts[0].toInteger()
     int py = parts[1].toInteger()
 
-    // ---- Read image patch ----
     def request = RegionRequest.createInstance(
         server.getPath(),
         downsample,
@@ -129,7 +132,6 @@ for (String key : patchKeys) {
         new File(buildFilePath(imagesDir, baseName + ".png"))
     )
 
-    // ---- Build YOLO label ----
     def labelLines = []
 
     for (PathAnnotationObject ann : annotations) {
@@ -138,58 +140,39 @@ for (String key : patchKeys) {
         if (roi == null) continue
         if (!intersectsPatch(roi, px, py)) continue
 
-        // Resolve class ID
-        int classId = defaultClassId
-        if (classMap != null) {
-            def pc = ann.getPathClass()
-            def clsName = (pc == null) ? null : pc.getName()
-            if (clsName == null || !classMap.containsKey(clsName)) continue
-            classId = classMap[clsName]
-        }
-
-        // Annotation bounds (full-res)
         double ax1 = roi.getBoundsX()
         double ay1 = roi.getBoundsY()
         double ax2 = ax1 + roi.getBoundsWidth()
         double ay2 = ay1 + roi.getBoundsHeight()
 
-        // Patch bounds (full-res)
-        double px1 = px
-        double py1 = py
-        double px2 = px + patchSize
-        double py2 = py + patchSize
-
-        // Intersection (full-res)
-        double ix1 = Math.max(ax1, px1)
-        double iy1 = Math.max(ay1, py1)
-        double ix2 = Math.min(ax2, px2)
-        double iy2 = Math.min(ay2, py2)
+        double ix1 = Math.max(ax1, px)
+        double iy1 = Math.max(ay1, py)
+        double ix2 = Math.min(ax2, px + patchSize)
+        double iy2 = Math.min(ay2, py + patchSize)
 
         double iw = ix2 - ix1
         double ih = iy2 - iy1
         if (iw <= 1 || ih <= 1) continue
 
-        // Convert to patch-relative OUTPUT pixels
-        double rx1 = (ix1 - px1) / downsample
-        double ry1 = (iy1 - py1) / downsample
-        double rx2 = (ix2 - px1) / downsample
-        double ry2 = (iy2 - py1) / downsample
+        double rx1 = (ix1 - px) / downsample
+        double ry1 = (iy1 - py) / downsample
+        double bw = iw / downsample
+        double bh = ih / downsample
 
-        double bw = rx2 - rx1
-        double bh = ry2 - ry1
-
-        // YOLO normalized
         double xc = (rx1 + bw / 2.0) / outPatchSize
         double yc = (ry1 + bh / 2.0) / outPatchSize
-        double wn = bw / outPatchSize
-        double hn = bh / outPatchSize
 
         labelLines.add(
-            String.format("%d %.6f %.6f %.6f %.6f", classId, xc, yc, wn, hn)
+            String.format(
+                "%d %.6f %.6f %.6f %.6f",
+                TARGET_CLASS_ID,
+                xc, yc,
+                bw / outPatchSize,
+                bh / outPatchSize
+            )
         )
     }
 
-    // ---- Save label (empty file is valid) ----
     new File(buildFilePath(labelsDir, baseName + ".txt")).text =
         labelLines.join("\n")
 
@@ -198,4 +181,4 @@ for (String key : patchKeys) {
         println "Exported ${patchIdx} patches"
 }
 
-println "✅ Done — exported ${patchIdx} YOLO patches"
+println "✅ Done — exported ${patchIdx} YOLO patches for class '${TARGET_CLASS_NAME}'"
