@@ -6,6 +6,7 @@ import javax.imageio.ImageIO
 import java.awt.image.BufferedImage
 import java.io.File
 import java.lang.Math
+import java.util.Random
 
 ImageIO.setUseCache(false)
 
@@ -18,7 +19,12 @@ def downsample = 1.0
 // ---- SINGLE CLASS CONFIG ----
 def TARGET_CLASS_NAME = "MG whole"   // must match QuPath class name exactly
 def TARGET_CLASS_ID   = 0            // YOLO class id
+
+// Randomness (set seed for reproducibility)
+def RNG_SEED = 1337
 // ================================================
+
+def rng = new Random(RNG_SEED)
 
 
 // --------------------------------------------------
@@ -41,7 +47,7 @@ def imageName = getProjectEntry().getImageName()
 int fullW = server.getWidth()
 int fullH = server.getHeight()
 
-// ---- FILTER ANNOTATIONS ONCE (CRITICAL) ----
+// ---- FILTER ANNOTATIONS ONCE ----
 def annotations = hierarchy.getAnnotationObjects().findAll { ann ->
     def pc = ann.getPathClass()
     pc != null && pc.getName() == TARGET_CLASS_NAME
@@ -54,21 +60,40 @@ int outPatchSize = (int)Math.round(patchSize / downsample)
 
 
 // --------------------------------------------------
-// Helper: compute centered patch (x,y) in full-res
+// Helper: random patch that fully contains ROI
 // --------------------------------------------------
-def getPatchXYCentered = { ROI roi ->
-    double cx = roi.getBoundsX() + roi.getBoundsWidth()  / 2.0
-    double cy = roi.getBoundsY() + roi.getBoundsHeight() / 2.0
+def getRandomPatchXYContainingROI = { ROI roi ->
 
-    int x = (int)Math.round(cx - patchSize / 2.0)
-    int y = (int)Math.round(cy - patchSize / 2.0)
+    double ax1 = roi.getBoundsX()
+    double ay1 = roi.getBoundsY()
+    double ax2 = ax1 + roi.getBoundsWidth()
+    double ay2 = ay1 + roi.getBoundsHeight()
 
-    if (x < 0) x = 0
-    if (y < 0) y = 0
-    if (x + patchSize > fullW) x = fullW - patchSize
-    if (y + patchSize > fullH) y = fullH - patchSize
+    // Valid patch top-left ranges
+    int minX = (int)Math.floor(ax2 - patchSize)
+    int maxX = (int)Math.ceil(ax1)
+    int minY = (int)Math.floor(ay2 - patchSize)
+    int maxY = (int)Math.ceil(ay1)
 
-    return [x, y]
+    // Clamp to image
+    minX = Math.max(0, minX)
+    minY = Math.max(0, minY)
+    maxX = Math.min(fullW - patchSize, maxX)
+    maxY = Math.min(fullH - patchSize, maxY)
+
+    // Fallback: center if annotation is larger than patch
+    if (minX > maxX || minY > maxY) {
+        int cx = (int)Math.round(ax1 + roi.getBoundsWidth() / 2.0 - patchSize / 2.0)
+        int cy = (int)Math.round(ay1 + roi.getBoundsHeight() / 2.0 - patchSize / 2.0)
+        cx = Math.max(0, Math.min(fullW - patchSize, cx))
+        cy = Math.max(0, Math.min(fullH - patchSize, cy))
+        return [cx, cy]
+    }
+
+    int px = minX + rng.nextInt(maxX - minX + 1)
+    int py = minY + rng.nextInt(maxY - minY + 1)
+
+    return [px, py]
 }
 
 
@@ -87,14 +112,14 @@ def intersectsPatch = { ROI roi, int px, int py ->
 
 
 // --------------------------------------------------
-// Step 1: build unique patch locations
+// Step 1: build patch locations (randomised)
 // --------------------------------------------------
 def patchKeys = new LinkedHashSet<String>()
 
 for (PathAnnotationObject ann : annotations) {
     ROI roi = ann.getROI()
     if (roi == null) continue
-    def (px, py) = getPatchXYCentered(roi)
+    def (px, py) = getRandomPatchXYContainingROI(roi)
     patchKeys.add("${px}_${py}")
 }
 
@@ -181,4 +206,4 @@ for (String key : patchKeys) {
         println "Exported ${patchIdx} patches"
 }
 
-println "✅ Done — exported ${patchIdx} YOLO patches for class '${TARGET_CLASS_NAME}'"
+println "✅ Done — exported ${patchIdx} YOLO patches with RANDOMIZED object positions"
