@@ -17,8 +17,8 @@ def downsample = 1.0             // 1.0 = full resolution
 def defaultClassId = 0           // single-class default
 
 // Optional multi-class mapping by QuPath class name
-// Example: def classMap = ["Cell":0, "Debris":1]
-def classMap = null              // set to null for single-class
+// def classMap = ["MG whole":0, "MG cell body":1, "Cluster": 2, "Dirt" : 3]
+def classMap = ["MG whole":0]
 // ================================================
 
 // --------------------------------------------------
