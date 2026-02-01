@@ -6,6 +6,49 @@ import os
 from helpers import get_file_name, output_masks_to_file_overlay
 
 
+def scale_boxes_xyxy(boxes, scale, image_shape):
+    """
+    Scale boxes around their center.
+
+    Parameters
+    ----------
+    boxes : np.ndarray (N, 4)
+        Boxes in [x1, y1, x2, y2] format.
+
+    scale : float
+        Scale factor (e.g. 2.0 = double size).
+
+    image_shape : tuple
+        (H, W) of image.
+
+    Returns
+    -------
+    np.ndarray
+        Scaled boxes (N, 4), clipped to image bounds.
+    """
+    H, W = image_shape
+    boxes = boxes.astype(np.float32)
+
+    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
+    w  = (boxes[:, 2] - boxes[:, 0]) * scale
+    h  = (boxes[:, 3] - boxes[:, 1]) * scale
+
+    x1 = cx - w / 2
+    y1 = cy - h / 2
+    x2 = cx + w / 2
+    y2 = cy + h / 2
+
+    # Clip to image bounds
+    x1 = np.clip(x1, 0, W - 1)
+    y1 = np.clip(y1, 0, H - 1)
+    x2 = np.clip(x2, 0, W - 1)
+    y2 = np.clip(y2, 0, H - 1)
+
+    return np.stack([x1, y1, x2, y2], axis=1).astype(np.int32)
+
+
+
 @torch.no_grad()
 def unet_inference(
     model,
@@ -18,6 +61,8 @@ def unet_inference(
     output_to_file=False,
     output_name=None,
     output_folder="segmentation/segmentation_output/custom_segmentation/",
+    expand_boxes=False,
+    box_scale=2.0,
 ):
     """
     Run UNet inference per YOLO bounding box.
@@ -49,6 +94,13 @@ def unet_inference(
         image_rgb = np.array(Image.open(image_path).convert("RGB"))
 
     H, W = image_rgb.shape[:2]
+
+    if expand_boxes:
+        boxes = scale_boxes_xyxy(
+            boxes,
+            scale=box_scale,
+            image_shape=(H, W)
+        )
     masks = []
 
     for box in boxes:
