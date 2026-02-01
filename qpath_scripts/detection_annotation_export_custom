@@ -1,0 +1,172 @@
+// ================= USER SETTINGS =================
+def outDir = "C:/Users/chris/Desktop/YOLO_dataset"
+def splitName = "train"          // "train" or "val"
+def patchSize = 512              // size of exported square patches
+def downsample = 1.0             // 1.0 = full resolution
+def classMap = [
+    "MG_whole": 0                    // QuPath class name → YOLO class id
+]
+// ================================================
+
+import qupath.lib.regions.RegionRequest
+import qupath.lib.objects.PathAnnotationObject
+import qupath.lib.roi.interfaces.ROI
+
+import javax.imageio.ImageIO
+import java.awt.image.BufferedImage
+import java.io.File
+import java.lang.Math
+
+ImageIO.setUseCache(false)
+
+// --------------------------------------------------
+// Setup output folders
+// --------------------------------------------------
+def imagesDir = buildFilePath(outDir, "images", splitName)
+def labelsDir = buildFilePath(outDir, "labels", splitName)
+mkdirs(imagesDir)
+mkdirs(labelsDir)
+
+// --------------------------------------------------
+// Access image + annotations
+// --------------------------------------------------
+def imageData = getCurrentImageData()
+def server = imageData.getServer()
+def hierarchy = imageData.getHierarchy()
+def imageName = getProjectEntry().getImageName()
+
+int fullW = server.getWidth()
+int fullH = server.getHeight()
+
+def annotations = hierarchy.getAnnotationObjects()
+println "▶ Found ${annotations.size()} annotations"
+
+// --------------------------------------------------
+// Helper: compute 512×512 patch anchored on annotation
+// --------------------------------------------------
+def getPatchForAnnotation = { ROI roi ->
+
+    double cx = roi.getBoundsX() + roi.getBoundsWidth()  / 2.0
+    double cy = roi.getBoundsY() + roi.getBoundsHeight() / 2.0
+
+    int x = Math.round(cx - patchSize / 2)
+    int y = Math.round(cy - patchSize / 2)
+
+    // Clamp to image bounds
+    if (x < 0) x = 0
+    if (y < 0) y = 0
+    if (x + patchSize > fullW) x = fullW - patchSize
+    if (y + patchSize > fullH) y = fullH - patchSize
+
+    return [x, y]
+}
+
+// --------------------------------------------------
+// Group annotations by patch (x,y)
+// --------------------------------------------------
+def patchMap = [:]  // key = "x_y" → list of annotations
+
+annotations.each { PathAnnotationObject ann ->
+
+    ROI roi = ann.getROI()
+    if (roi == null) return
+
+    def (px, py) = getPatchForAnnotation(roi)
+    def key = "${px}_${py}"
+
+    if (!patchMap.containsKey(key))
+        patchMap[key] = []
+
+    patchMap[key] << ann
+}
+
+println "Unique patches to export: ${patchMap.size()}"
+
+// --------------------------------------------------
+// Export patches + YOLO labels
+// --------------------------------------------------
+int patchIdx = 0
+
+patchMap.each { key, annsInPatch ->
+
+    def (px, py) = key.split("_")*.toInteger()
+
+    def request = RegionRequest.createInstance(
+        server.getPath(),
+        downsample,
+        px, py,
+        patchSize, patchSize
+    )
+
+    BufferedImage img = server.readBufferedImage(request)
+    if (img == null) return
+
+    def baseName = String.format(
+        "%s_x%d_y%d_ps%d",
+        imageName, px, py, patchSize
+    )
+
+    // ---------- SAVE IMAGE ----------
+    def imgPath = buildFilePath(imagesDir, baseName + ".png")
+    ImageIO.write(img, "PNG", new File(imgPath))
+
+    // ---------- BUILD YOLO LABEL ----------
+    def labelLines = []
+
+    annsInPatch.each { PathAnnotationObject ann ->
+
+        ROI roi = ann.getROI()
+
+        def cls = ann.getPathClass()
+        def clsName = cls == null ? null : cls.toString()
+        if (!classMap.containsKey(clsName))
+            return
+
+        int classId = classMap[clsName]
+
+        // Annotation bounds (full-res)
+        double ax = roi.getBoundsX()
+        double ay = roi.getBoundsY()
+        double aw = roi.getBoundsWidth()
+        double ah = roi.getBoundsHeight()
+
+        // Convert to patch-relative coords
+        double bx = ax - px
+        double by = ay - py
+
+        // Skip if annotation is completely outside patch
+        if (bx + aw <= 0 || by + ah <= 0) return
+        if (bx >= patchSize || by >= patchSize) return
+
+        // Clamp box to patch
+        double x1 = Math.max(0, bx)
+        double y1 = Math.max(0, by)
+        double x2 = Math.min(patchSize, bx + aw)
+        double y2 = Math.min(patchSize, by + ah)
+
+        double bw = x2 - x1
+        double bh = y2 - y1
+
+        if (bw <= 1 || bh <= 1) return
+
+        double xc = (x1 + bw / 2.0) / patchSize
+        double yc = (y1 + bh / 2.0) / patchSize
+        double wn = bw / patchSize
+        double hn = bh / patchSize
+
+        labelLines << String.format(
+            "%d %.6f %.6f %.6f %.6f",
+            classId, xc, yc, wn, hn
+        )
+    }
+
+    // ---------- SAVE LABEL ----------
+    def labelPath = buildFilePath(labelsDir, baseName + ".txt")
+    new File(labelPath).text = labelLines.join("\n")
+
+    patchIdx++
+    if (patchIdx % 50 == 0)
+        println "Exported ${patchIdx} patches"
+}
+
+println "Done — exported ${patchIdx} YOLO patches"
