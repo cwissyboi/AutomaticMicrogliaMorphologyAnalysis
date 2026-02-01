@@ -3,6 +3,9 @@ from object_detection.yolo_pretrained.yolo_inference import yolo_inference
 from segmentation.sam.sam_inference import sam_inference
 from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_soma_masks
 from morphology.morphology_features import get_skeletons, get_morphology_dataframe
+from segmentation.custom_segmentation.training.unet import UNet
+from segmentation.custom_segmentation.segmentation_inference import unet_inference
+
 import torch
 import cv2
 import numpy as np
@@ -10,7 +13,6 @@ from segment_anything import sam_model_registry, SamPredictor
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
-
 
 def main():
     args = parse_args()
@@ -27,12 +29,23 @@ def main():
     )
 
     # Initiate SAM model
-    sam = sam_model_registry["vit_b"](
-        checkpoint="../sam_files/sam_vit_b_01ec64.pth"
-    )
-    sam.to("cuda" if torch.cuda.is_available() else "cpu")
+    # sam = sam_model_registry["vit_b"](
+    #     checkpoint="../sam_files/sam_vit_b_01ec64.pth"
+    # )
+    # sam.to("cuda" if torch.cuda.is_available() else "cpu")
 
-    sam_predictor = SamPredictor(sam)
+    # sam_predictor = SamPredictor(sam)
+
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = UNet()
+    ckpt_path = "segmentation/custom_segmentation/checkpoints/best_run_25_1.pth"
+    state_dict = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+
 
 
     input_dir = Path(input_folder_path)
@@ -51,10 +64,11 @@ def main():
 
             # Pipeline steps
             yolo_boxes = yolo_inference(yolo, image_path, output_name = output_name,  output_to_file=False)
-            sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=False)
+            # sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
+            segmentation_masks = unet_inference(model, yolo_boxes, image_path = image_path,  image_rgb=image_rgb, device = device, output_to_file = True, output_name = output_name)
             soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= False)
-            skeletons = get_skeletons(image_rgb, image_path, sam_masks, soma_masks, output_to_file = False, output_name = output_name)
-            results_df = get_morphology_dataframe(sam_masks, skeletons, soma_masks, yolo_boxes)
+            skeletons = get_skeletons(image_rgb, image_path, segmentation_masks, soma_masks, output_to_file = False, output_name = output_name)
+            results_df = get_morphology_dataframe(segmentation_masks, skeletons, soma_masks, yolo_boxes)
 
             # results_df["image_path"] = image_path
             results_df["image_name"] = file_name
