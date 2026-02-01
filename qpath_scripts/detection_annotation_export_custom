@@ -14,10 +14,10 @@ def outDir = "C:/Users/chris/Desktop/YOLO_dataset"
 def splitName = "train"          // "train" or "val"
 def patchSize = 512              // patch size in *full-res pixels*
 def downsample = 1.0             // 1.0 = full resolution
-def defaultClassId = 0           // if you want single-class, use this
+def defaultClassId = 0           // single-class default
 
-// Optional multi-class mapping by QuPath class name:
-// e.g. classMap = ["Cell":0, "Debris":1]
+// Optional multi-class mapping by QuPath class name
+// Example: def classMap = ["Cell":0, "Debris":1]
 def classMap = null              // set to null for single-class
 // ================================================
 
@@ -57,7 +57,7 @@ def getPatchXYCentered = { ROI roi ->
     int x = (int)Math.round(cx - patchSize / 2.0)
     int y = (int)Math.round(cy - patchSize / 2.0)
 
-    // Clamp
+    // Clamp to image bounds
     if (x < 0) x = 0
     if (y < 0) y = 0
     if (x + patchSize > fullW) x = fullW - patchSize
@@ -67,8 +67,7 @@ def getPatchXYCentered = { ROI roi ->
 }
 
 // --------------------------------------------------
-// Helper: check if ROI bounds intersects patch
-// (fast bounding-box intersection, full-res coords)
+// Helper: bounding-box intersection test (full-res)
 // --------------------------------------------------
 def intersectsPatch = { ROI roi, int px, int py ->
     double ax1 = roi.getBoundsX()
@@ -85,13 +84,13 @@ def intersectsPatch = { ROI roi, int px, int py ->
 }
 
 // --------------------------------------------------
-// Step 1: build unique patch locations from annotation centers
+// Step 1: build unique patch locations
 // --------------------------------------------------
 def patchKeys = new LinkedHashSet<String>()
 
-annotations.each { PathAnnotationObject ann ->
+for (PathAnnotationObject ann : annotations) {
     ROI roi = ann.getROI()
-    if (roi == null) return
+    if (roi == null) continue
     def (px, py) = getPatchXYCentered(roi)
     patchKeys.add("${px}_${py}")
 }
@@ -99,16 +98,17 @@ annotations.each { PathAnnotationObject ann ->
 println "▶ Unique patches to export: ${patchKeys.size()}"
 
 // --------------------------------------------------
-// Step 2: for each patch, include ALL annotations that intersect it
+// Step 2: export patches + YOLO labels
 // --------------------------------------------------
 int patchIdx = 0
 
-patchKeys.each { key ->
+for (String key : patchKeys) {
+
     def parts = key.split("_")
     int px = parts[0].toInteger()
     int py = parts[1].toInteger()
 
-    // Read image region
+    // ---- Read image patch ----
     def request = RegionRequest.createInstance(
         server.getPath(),
         downsample,
@@ -117,49 +117,49 @@ patchKeys.each { key ->
     )
 
     BufferedImage img = server.readBufferedImage(request)
-    if (img == null) return
+    if (img == null) continue
 
-    // Name includes original coordinates for traceability
-    def baseName = String.format("%s_x%d_y%d_ps%d_ds%d",
-        imageName, px, py, patchSize, (int)Math.round(downsample)
+    def baseName = String.format(
+        "%s_x%d_y%d_ps%d",
+        imageName, px, py, patchSize
     )
 
-    // Save image
-    def imgPath = buildFilePath(imagesDir, baseName + ".png")
-    ImageIO.write(img, "PNG", new File(imgPath))
+    ImageIO.write(
+        img, "PNG",
+        new File(buildFilePath(imagesDir, baseName + ".png"))
+    )
 
-    // Build label lines
+    // ---- Build YOLO label ----
     def labelLines = []
 
-    annotations.each { PathAnnotationObject ann ->
+    for (PathAnnotationObject ann : annotations) {
+
         ROI roi = ann.getROI()
-        if (roi == null) return
+        if (roi == null) continue
+        if (!intersectsPatch(roi, px, py)) continue
 
-        // Only include annotations that intersect this patch
-        if (!intersectsPatch(roi, px, py)) return
-
-        // Resolve class id
+        // Resolve class ID
         int classId = defaultClassId
         if (classMap != null) {
             def pc = ann.getPathClass()
-            def clsName = (pc == null) ? null : pc.getName()  // more reliable than toString()
-            if (clsName == null || !classMap.containsKey(clsName)) return
+            def clsName = (pc == null) ? null : pc.getName()
+            if (clsName == null || !classMap.containsKey(clsName)) continue
             classId = classMap[clsName]
         }
 
-        // Annotation bounds in full-res
+        // Annotation bounds (full-res)
         double ax1 = roi.getBoundsX()
         double ay1 = roi.getBoundsY()
         double ax2 = ax1 + roi.getBoundsWidth()
         double ay2 = ay1 + roi.getBoundsHeight()
 
-        // Patch bounds in full-res
+        // Patch bounds (full-res)
         double px1 = px
         double py1 = py
         double px2 = px + patchSize
         double py2 = py + patchSize
 
-        // Intersection bounds in full-res
+        // Intersection (full-res)
         double ix1 = Math.max(ax1, px1)
         double iy1 = Math.max(ay1, py1)
         double ix2 = Math.min(ax2, px2)
@@ -167,10 +167,9 @@ patchKeys.each { key ->
 
         double iw = ix2 - ix1
         double ih = iy2 - iy1
-        if (iw <= 1 || ih <= 1) return
+        if (iw <= 1 || ih <= 1) continue
 
-        // Convert intersection box into patch-relative OUTPUT pixel coords
-        // (subtract patch origin, then divide by downsample)
+        // Convert to patch-relative OUTPUT pixels
         double rx1 = (ix1 - px1) / downsample
         double ry1 = (iy1 - py1) / downsample
         double rx2 = (ix2 - px1) / downsample
@@ -179,27 +178,24 @@ patchKeys.each { key ->
         double bw = rx2 - rx1
         double bh = ry2 - ry1
 
-        // YOLO normalized (relative to output patch size)
+        // YOLO normalized
         double xc = (rx1 + bw / 2.0) / outPatchSize
         double yc = (ry1 + bh / 2.0) / outPatchSize
         double wn = bw / outPatchSize
         double hn = bh / outPatchSize
 
-        // Clamp to [0,1] just to be safe
-        xc = Math.max(0.0, Math.min(1.0, xc))
-        yc = Math.max(0.0, Math.min(1.0, yc))
-        wn = Math.max(0.0, Math.min(1.0, wn))
-        hn = Math.max(0.0, Math.min(1.0, hn))
-
-        labelLines << String.format("%d %.6f %.6f %.6f %.6f", classId, xc, yc, wn, hn)
+        labelLines.add(
+            String.format("%d %.6f %.6f %.6f %.6f", classId, xc, yc, wn, hn)
+        )
     }
 
-    // Save label (even if empty, YOLO expects an empty file for "no objects")
-    def labelPath = buildFilePath(labelsDir, baseName + ".txt")
-    new File(labelPath).text = labelLines.join("\n")
+    // ---- Save label (empty file is valid) ----
+    new File(buildFilePath(labelsDir, baseName + ".txt")).text =
+        labelLines.join("\n")
 
     patchIdx++
-    if (patchIdx % 50 == 0) println "Exported ${patchIdx} patches"
+    if (patchIdx % 50 == 0)
+        println "Exported ${patchIdx} patches"
 }
 
 println "✅ Done — exported ${patchIdx} YOLO patches"
