@@ -1,4 +1,4 @@
-path: C:/Users/chris/Desktop/YOLO_dataset
+path: ../../../YOLO_dataset
 train: images/train
 val: images/val
 test: images/test

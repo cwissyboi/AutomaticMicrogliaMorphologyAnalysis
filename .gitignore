@@ -19,3 +19,4 @@ segmentation_venv
 initial_pipeline/segmentation/custom_segmentation/random_disconnections/__pycache__
 initial_pipeline/segmentation/custom_segmentation/training/__pycache__
 runs
+YOLO_dataset

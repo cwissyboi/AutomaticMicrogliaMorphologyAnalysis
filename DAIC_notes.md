@@ -86,7 +86,7 @@ pip install --no-cache-dir torch torchvision torchaudio --index-url https://down
 before pip installing the requirements
 
 
-conda activate ./segmentation_venv
+conda activate ./segmentation_conda
 
 
 module load miniconda/3.11
@@ -110,3 +110,6 @@ pip install pandas==2.1.4 --no-deps
 pip install pand==2.1.4 --no-deps
 
 python segmentation_training.py --add_new_components True --disconnect_components False
+
+
+numpy 1.26.4
