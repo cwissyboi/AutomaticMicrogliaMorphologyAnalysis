@@ -13,6 +13,7 @@ from segment_anything import sam_model_registry, SamPredictor
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
+from ultralytics import YOLO
 
 def main():
     args = parse_args()
@@ -22,11 +23,19 @@ def main():
 
     # Load yolo model from saved output
     # TO DO: Make the parameters here input args and the same for SAM paths
-    yolo = torch.hub.load(
-        'ultralytics/yolov5',
-        'custom',
-        path='../yolov3_weights.pt'
-    )
+    # yolo = torch.hub.load(
+    #     'ultralytics/yolov5',
+    #     'custom',
+    #     path='../yolov3_weights.pt'
+    # )
+
+    print('custom yolo')
+    # yolo = torch.hub.load(
+    #     'ultralytics/yolov8',
+    #     'custom',
+    #     path='../runs/detect/yolo_cell_10_epochs/weights/best.pt'
+    # )
+    yolo = YOLO(r"C:\Users\chris\Desktop\University\Thesis\AutomaticMicrogliaMorphologyAnalysis\runs\detect\yolo_cells_10_epochs\weights\best.pt")
 
     # Initiate SAM model
     # sam = sam_model_registry["vit_b"](
@@ -63,13 +72,13 @@ def main():
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             # Pipeline steps
-            yolo_boxes = yolo_inference(yolo, image_path, output_name = output_name,  output_to_file=False)
+            yolo_boxes = yolo_inference(yolo, image_path, output_name = output_name,  output_to_file=True)
             # sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
             segmentation_masks = unet_inference(model, yolo_boxes, image_path = image_path,  image_rgb=image_rgb, 
                                                 device = device, output_to_file = True, output_name = output_name, 
                                                 expand_boxes=True)
-            soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= False)
-            skeletons = get_skeletons(image_rgb, image_path, segmentation_masks, soma_masks, output_to_file = False, output_name = output_name)
+            soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= True)
+            skeletons = get_skeletons(image_rgb, image_path, segmentation_masks, soma_masks, output_to_file = True, output_name = output_name)
             results_df = get_morphology_dataframe(segmentation_masks, skeletons, soma_masks, yolo_boxes)
 
             # results_df["image_path"] = image_path

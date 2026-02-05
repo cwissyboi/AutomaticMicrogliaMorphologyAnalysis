@@ -3,11 +3,11 @@ import javax.imageio.ImageIO
 
 def server = getCurrentImageData().getServer()
 
-def tileSize = 1024
+def tileSize = 512
 def downsample = 1.0
-def maxTiles = 10000
+def maxTiles = 30000
 
-def outDir = "C:/Users/chris/Desktop/AnnotationsTest"
+def outDir = "C:/Users/chris/Desktop/Tiles512"
 mkdirs(outDir)
 
 int width = server.getWidth()
