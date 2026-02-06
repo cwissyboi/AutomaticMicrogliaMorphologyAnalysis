@@ -20,3 +20,4 @@ initial_pipeline/segmentation/custom_segmentation/random_disconnections/__pycach
 initial_pipeline/segmentation/custom_segmentation/training/__pycache__
 runs
 YOLO_dataset
+initial_pipeline/object_detection/custom_detection/yolo_runs
