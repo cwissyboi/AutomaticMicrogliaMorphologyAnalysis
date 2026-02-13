@@ -21,3 +21,7 @@ initial_pipeline/segmentation/custom_segmentation/training/__pycache__
 runs
 YOLO_dataset
 initial_pipeline/object_detection/custom_detection/yolo_runs
+YOLO_adjusted_dataset
+YOLO_dataset.zip
+YOLO_dataset_original
+YOLO_dataset_adjusted

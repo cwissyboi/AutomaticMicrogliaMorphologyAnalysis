@@ -1,8 +1,8 @@
-path: ../../../YOLO_dataset
+path: ../../../YOLO_dataset_adjusted
 train: images/train
 val: images/val
 test: images/test
 
 nc: 1
 names:
-  0: MG whole
+  0: Microglia

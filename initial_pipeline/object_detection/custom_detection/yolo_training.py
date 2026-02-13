@@ -6,19 +6,19 @@ from datetime import datetime
 def print_yolo_metrics(metrics):
     print("\n=== YOLO Evaluation Metrics (Test Set) ===")
 
-    print(f"mAP@50:      {metrics.box.map50:.3f}")
-    print(f"mAP@50–95:   {metrics.box.map:.3f}")
-    print(f"Precision:   {metrics.box.mp:.3f}")
-    print(f"Recall:      {metrics.box.mr:.3f}")
+    print(f"mAP@50:      {metrics.box.map50:.5f}")
+    print(f"mAP@50–95:   {metrics.box.map:.5f}")
+    print(f"Precision:   {metrics.box.mp:.5f}")
+    print(f"Recall:      {metrics.box.mr:.5f}")
 
     print("\nPer-class results:")
     for i, name in metrics.names.items():
         print(
             f"  Class '{name}': "
-            f"P={metrics.box.p[i]:.3f}, "
-            f"R={metrics.box.r[i]:.3f}, "
-            f"AP50={metrics.box.ap50[i]:.3f}, "
-            f"AP={metrics.box.ap[i]:.3f}"
+            f"P={metrics.box.p[i]:.5f}, "
+            f"R={metrics.box.r[i]:.5f}, "
+            f"AP50={metrics.box.ap50[i]:.5f}, "
+            f"AP={metrics.box.ap[i]:.5f}"
         )
 
 
@@ -44,7 +44,8 @@ def main():
 
     results = model.train(
         data=DATA_YAML,
-        epochs=1,
+        epochs=100,
+        patience = 10,
         imgsz=512,
         batch=16,
         device=device,
