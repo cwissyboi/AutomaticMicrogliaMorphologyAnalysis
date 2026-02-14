@@ -64,17 +64,32 @@ def main():
 
     human_run_name = f"human_finetune_{timestamp}"
 
+    # human_results = model.train(
+    #     data=HUMAN_DATA_YAML,
+    #     epochs=100,              
+    #     patience=10,
+    #     imgsz=512,
+    #     batch=16,
+    #     device=device,
+    #     lr0=0.001,              # lower learning rate for finetuning
+    #     name=human_run_name,
+    #     project=runs_dir
+    # )
+
     human_results = model.train(
         data=HUMAN_DATA_YAML,
-        epochs=100,              
+        epochs=100,
         patience=10,
         imgsz=512,
         batch=16,
         device=device,
-        lr0=0.001,              # lower learning rate for finetuning
+        optimizer="AdamW",   # or "SGD"
+        lr0=0.001,
+        momentum=0.937,      # only meaningful for SGD; AdamW uses beta1/beta2 internally
         name=human_run_name,
         project=runs_dir
-    )
+        )
+
 
     human_best_path = os.path.join(human_results.save_dir, "weights", "best.pt")
 
