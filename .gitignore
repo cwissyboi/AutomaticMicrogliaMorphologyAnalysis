@@ -26,3 +26,6 @@ YOLO_dataset.zip
 YOLO_dataset_original
 YOLO_dataset_adjusted
 initial_pipeline/object_detection/custom_detection/rat_yolo_dataset
+YOLO_dataset_rat
+YOLO_rat_adjusted_1
+YOLO_dataset_rat.zip
