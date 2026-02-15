@@ -58,46 +58,71 @@ def main():
 
 
 
+    # input_dir = Path(input_folder_path)
+    # all_results = []
+
+    # image_paths = list(input_dir.iterdir())
+    # for image_path in tqdm(image_paths, desc="Processing images"):
+    #     if image_path.is_file():
+    #         # convert it from a path to a string to avoid YOLO's 'ends with extension' error
+    #         image_path = str(image_path)
+    #         print(image_path)
+    #         file_name = get_file_name(image_path)
+    #         image = cv2.imread(image_path)
+    #         h, w = image.shape[:2]
+    #         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
     input_dir = Path(input_folder_path)
     all_results = []
 
-    image_paths = list(input_dir.iterdir())
-    for image_path in tqdm(image_paths, desc="Processing images"):
-        if image_path.is_file():
-            # convert it from a path to a string to avoid YOLO's 'ends with extension' error
-            image_path = str(image_path)
-            print(image_path)
-            file_name = get_file_name(image_path)
-            image = cv2.imread(image_path)
-            h, w = image.shape[:2]
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Iterate over subfolders
+    scan_folders = [p for p in input_dir.iterdir() if p.is_dir()]
+    for scan_folder in scan_folders:
 
-            # Pipeline steps
-            yolo_boxes = yolo_inference(yolo, image_path, output_name = output_name,  output_to_file=True)
-            if (len(yolo_boxes) >=1):
-                # sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
-                segmentation_masks = unet_inference(model, yolo_boxes, image_path = image_path,  image_rgb=image_rgb, 
-                                                    device = device, output_to_file = True, output_name = output_name, 
-                                                    expand_boxes=False)
-                
-                # connect componenents of the mask
-                # TO DO: Handle situtaions where they are multipl segmentation_masks
-                connected_masks = connect_all_masks(segmentation_masks, image, image_path, output_to_file = True, output_name = output_name)
-                soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= True)
-                skeletons = get_skeletons(image_rgb, image_path, connected_masks, soma_masks, output_to_file = True, output_name = output_name)
-                results_df = get_morphology_dataframe(segmentation_masks, skeletons, soma_masks, yolo_boxes)
+        scan_folder_name = scan_folder.name
+        print(f"\nProcessing scan folder: {scan_folder_name}")
 
-                # results_df["image_path"] = image_path
-                results_df["image_name"] = file_name
+        image_paths = list(scan_folder.iterdir())
 
-                # Global unique cell ID
-                results_df["global_cell_id"] = (
-                    results_df["image_name"]
-                    + "_cell_"
-                    + results_df["cell_id"].astype(str)
-                )
+        for image_path in tqdm(image_paths, desc=f"Images in {scan_folder_name}"):
 
-                all_results.append(results_df)
+            if image_path.is_file():
+
+                image_path = str(image_path)
+                file_name = get_file_name(image_path)
+
+                image = cv2.imread(image_path)
+                h, w = image.shape[:2]
+                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+                # Pipeline steps
+                yolo_boxes = yolo_inference(yolo, image_path,  output_name = output_name,  output_to_file=True, scan_folder=scan_folder_name)
+                if (len(yolo_boxes) >=1):
+                    # sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
+                    segmentation_masks = unet_inference(model, yolo_boxes, image_path = image_path,  image_rgb=image_rgb, 
+                                                        device = device, output_to_file = True, output_name = output_name, 
+                                                        expand_boxes=False, scan_folder = scan_folder_name)
+                    
+                    # connect componenents of the mask
+                    # TO DO: Handle situtaions where they are multipl segmentation_masks
+                    connected_masks = connect_all_masks(segmentation_masks, image, image_path, output_to_file = True, output_name = output_name, scan_folder = scan_folder_name)
+                    soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= True, scan_folder = scan_folder_name)
+                    skeletons = get_skeletons(image_rgb, image_path, connected_masks, soma_masks, output_to_file = True, output_name = output_name, scan_folder = scan_folder_name)
+                    results_df = get_morphology_dataframe(segmentation_masks, skeletons, soma_masks, yolo_boxes)
+
+                    # results_df["image_path"] = image_path
+                    results_df["image_name"] = file_name
+                    results_df["scan_folder"] = scan_folder_name
+
+
+                    # Global unique cell ID
+                    results_df["global_cell_id"] = (
+                        results_df["image_name"]
+                        + "_cell_"
+                        + results_df["cell_id"].astype(str)
+                    )
+
+                    all_results.append(results_df)
 
     final_df = pd.concat(all_results, ignore_index=True)
 

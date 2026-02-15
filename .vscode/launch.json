@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug main.py (slide_5)",
+            "name": "Debug main.py (scans_512)",
             "type": "python",
             "request": "launch",
 
@@ -14,9 +14,9 @@
 
             "args": [
                 "--input_folder_path",
-                "../tiles/slide_5/",
+                "../tiles/scans_512/",
                 "--output_name",
-                "slide_5"
+                "scans_512"
             ],
 
             "justMyCode": false

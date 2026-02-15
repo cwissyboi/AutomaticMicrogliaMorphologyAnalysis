@@ -54,6 +54,7 @@ def unet_inference(
     model,
     boxes,
     image_path,
+    scan_folder, 
     image_rgb=None,
     device="cuda",
     threshold=0.5,
@@ -141,7 +142,7 @@ def unet_inference(
         if output_name is None:
             output_name = get_file_name(image_path)
 
-        out_dir = os.path.join(output_folder, output_name)
+        out_dir = os.path.join(output_folder, output_name, scan_folder)
         os.makedirs(out_dir, exist_ok=True)
 
         output_masks_to_file_overlay(

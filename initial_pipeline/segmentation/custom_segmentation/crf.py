@@ -400,7 +400,7 @@ def connect_components_adaptive(
 
 
 
-def connect_all_masks(masks, image, image_path,  output_to_file = True,   
+def connect_all_masks(masks, image, image_path, scan_folder,  output_to_file = True,   
         output_name = 'temp', 
         output_folder = 'segmentation/segmentation_output/custom_segmentation/postprocessing'):
     
@@ -416,7 +416,7 @@ def connect_all_masks(masks, image, image_path,  output_to_file = True,
         if output_name is None:
             output_name = get_file_name(image_path)
 
-        out_dir = os.path.join(output_folder, output_name)
+        out_dir = os.path.join(output_folder, output_name, scan_folder)
         os.makedirs(out_dir, exist_ok=True)
         # If image was loaded with cv2 (BGR), convert to RGB
         image_fixed = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
