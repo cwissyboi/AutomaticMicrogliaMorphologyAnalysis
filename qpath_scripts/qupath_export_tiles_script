@@ -1,63 +1,112 @@
 import qupath.lib.regions.RegionRequest
 import javax.imageio.ImageIO
 
-def server = getCurrentImageData().getServer()
+def imageData = getCurrentImageData()
+def server = imageData.getServer()
+def hierarchy = imageData.getHierarchy()
 
 def tileSize = 512
 def downsample = 1.0
-def maxTiles = 30000
 
-def outDir = "C:/Users/chris/Desktop/Tiles512"
+// --------------------------------------------------
+// Base output directory
+// --------------------------------------------------
+def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled"
+mkdirs(baseOutDir)
+
+// --------------------------------------------------
+// Get current image name (cleaned safely)
+// --------------------------------------------------
+def imageName = imageData.getServer().getMetadata().getName()
+
+int dotIndex = imageName.lastIndexOf(".")
+if (dotIndex > 0) {
+    imageName = imageName.substring(0, dotIndex)
+}
+
+imageName = imageName.replace(" ", "_")
+
+// Create scan-specific subfolder
+def outDir = baseOutDir + File.separator + imageName
 mkdirs(outDir)
+
+print "Exporting tiles for scan: ${imageName}"
+print "Output folder: ${outDir}"
 
 int width = server.getWidth()
 int height = server.getHeight()
 
 // --------------------------------------------------
-// 1) Pre-calculate number of tiles
+// Treat ALL annotations as gray matter
+// --------------------------------------------------
+def grayAnnotations = hierarchy.getAnnotationObjects()
+
+if (grayAnnotations.isEmpty()) {
+    print "WARNING: No annotations found."
+} else {
+    print "Found ${grayAnnotations.size()} annotation(s) — treated as gray matter."
+}
+
 // --------------------------------------------------
 int tilesX = (int) Math.ceil(width  / (double) tileSize)
 int tilesY = (int) Math.ceil(height / (double) tileSize)
-
 int totalTiles = tilesX * tilesY
-totalTiles = Math.min(totalTiles, maxTiles)
 
 print "Will export ${totalTiles} tiles (${tilesX} x ${tilesY})"
 
-// --------------------------------------------------
-// 2) Export with progress reporting
-// --------------------------------------------------
 int tileID = 0
 
-outer:
 for (int y = 0; y < height; y += tileSize) {
     for (int x = 0; x < width; x += tileSize) {
 
-        if (tileID >= totalTiles)
-            break outer
+        try {
 
-        def region = RegionRequest.createInstance(
-            server.getPath(),
-            downsample,
-            x, y,
-            tileSize, tileSize
-        )
+            def region = RegionRequest.createInstance(
+                server.getPath(),
+                downsample,
+                x, y,
+                tileSize, tileSize
+            )
 
-        def img = server.readBufferedImage(region)
-        if (img == null)
-            continue
+            def img = server.readRegion(region)
+            if (img == null)
+                continue
 
-        def outPath = outDir + File.separator +
-            String.format("tile_%05d_x%d_y%d.jpg", tileID, x, y)
+            // ---- Compute tile center ----
+            double centerX = x + tileSize / 2.0
+            double centerY = y + tileSize / 2.0
 
-        ImageIO.write(img, "JPEG", new File(outPath))
-        tileID++
+            boolean isGray = false
+            for (ann in grayAnnotations) {
+                if (ann.getROI().contains(centerX, centerY)) {
+                    isGray = true
+                    break
+                }
+            }
 
-        // ---- Progress every 100 tiles ----
-        if (tileID % 100 == 0 || tileID == totalTiles) {
-            print "Exported ${tileID} / ${totalTiles} tiles"
+            String tissueLabel = isGray ? "_gray_matter" : "_white_matter"
+
+            def outPath = outDir + File.separator +
+                String.format("tile_%05d_x%d_y%d%s.jpg",
+                              tileID, x, y, tissueLabel)
+
+            ImageIO.write(img, "JPEG", new File(outPath))
+            tileID++
+
+            if (tileID % 100 == 0 || tileID == totalTiles) {
+                print "Exported ${tileID} / ${totalTiles} tiles"
+            }
+
+            Thread.sleep(10)
+
+            if (tileID % 1000 == 0) {
+                System.gc()
+            }
+
+        } catch (Exception e) {
+            print "Skipped tile at x=${x}, y=${y}"
         }
     }
 }
 
-print "DONE — Exported ${tileID} tiles"
+print "DONE — Exported ${tileID} tiles for scan ${imageName}"
