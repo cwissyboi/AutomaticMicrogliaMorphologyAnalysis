@@ -156,7 +156,7 @@ def output_masks_to_file_overlay(
         )
 
     file_name = get_file_name(image_path)
-    out_path = f"{output_folder}{file_name}_{suffix}.jpg"
+    out_path = f"{output_folder}/{file_name}_{suffix}.jpg"
 
     # Convert RGB → BGR for cv2 saving
     cv2.imwrite(out_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))

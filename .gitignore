@@ -31,3 +31,6 @@ YOLO_rat_adjusted_1
 YOLO_dataset_rat.zip
 YOLO_dataset_adjusted_gray
 YOLO_rat_adjusted_1_gray
+tiles
+initial_pipeline/segmentation/segmentation_output
+initial_pipeline/object_detection

@@ -408,7 +408,7 @@ def connect_all_masks(masks, image, image_path,  output_to_file = True,
 
     for mask in masks: 
         # connected_mask = connect_components_geodesic_similarity(mask, image)
-        connected_mask = connect_components_adaptive(mask, image)
+        connected_mask = connect_components_adaptive(mask, image, min_component_frac=0.0)
         connected_masks.append(connected_mask)
 
 
