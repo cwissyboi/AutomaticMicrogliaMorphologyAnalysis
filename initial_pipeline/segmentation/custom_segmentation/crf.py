@@ -246,6 +246,12 @@ from scipy.ndimage import distance_transform_edt
 from skimage.graph import route_through_array
 
 
+import numpy as np
+import cv2
+from scipy.ndimage import distance_transform_edt
+from skimage.graph import route_through_array
+
+
 def connect_components_adaptive(
     binary_mask,
     image,
@@ -257,8 +263,8 @@ def connect_components_adaptive(
     """
     Connect disconnected components inside a mask using:
     - Red-favoring geodesic routing
-    - Adaptive thickness based on component thickness
-    - No global 'main' component assumption
+    - Adaptive thickness based on component thickness (robust median DT)
+    - Smooth dilation-based bridge drawing
     """
 
     H, W = binary_mask.shape
@@ -269,7 +275,6 @@ def connect_components_adaptive(
 
     # Label components
     num_labels, labels = cv2.connectedComponents(binary_mask)
-
     if num_labels <= 2:
         return binary_mask
 
@@ -286,7 +291,7 @@ def connect_components_adaptive(
     # --- Build cost map favoring red ---
     image_float = image.astype(np.float32)
 
-    # Red preference (low cost where red is strong)
+    # Adjust if your image is RGB instead of BGR
     red = image_float[:, :, 2]
     green = image_float[:, :, 1]
     blue = image_float[:, :, 0]
@@ -294,8 +299,7 @@ def connect_components_adaptive(
     red_score = red - 0.5 * (green + blue)
     red_score = (red_score - red_score.min()) / (red_score.ptp() + 1e-6)
 
-    red_cost = 1.0 - red_score
-    red_cost *= red_weight
+    red_cost = (1.0 - red_score) * red_weight
 
     # Smoothness cost
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -308,16 +312,11 @@ def connect_components_adaptive(
 
     cost = red_cost + smooth_cost
 
-    # Thickness map
-    thickness_map = distance_transform_edt(binary_mask)
-
-    # Iteratively merge nearest components
     current_mask = binary_mask.copy()
 
     while True:
 
         num_labels, labels = cv2.connectedComponents(current_mask)
-
         if num_labels <= 2:
             break
 
@@ -330,13 +329,12 @@ def connect_components_adaptive(
         best_pair = None
         best_distance = np.inf
 
-        # Find closest pair of components
+        # --- Find closest pair of components ---
         for i in range(len(label_ids)):
             for j in range(i + 1, len(label_ids)):
                 comp1 = components[label_ids[i]]
                 comp2 = components[label_ids[j]]
 
-                # Compute min Euclidean distance
                 dists = np.linalg.norm(
                     comp1[:, None, :] - comp2[None, :, :],
                     axis=2
@@ -359,7 +357,7 @@ def connect_components_adaptive(
 
         label1, label2, p1, p2 = best_pair
 
-        # Compute geodesic path
+        # --- Geodesic path ---
         path, _ = route_through_array(
             cost,
             p1,
@@ -367,16 +365,38 @@ def connect_components_adaptive(
             fully_connected=True
         )
 
-        # Determine adaptive radius
-        r1 = thickness_map[p1]
-        r2 = thickness_map[p2]
-        radius = int(max(1, min(r1, r2)))
+        # --- Robust thickness estimation ---
+        comp_mask1 = (labels == label1).astype(np.uint8)
+        comp_mask2 = (labels == label2).astype(np.uint8)
 
-        # Draw thick path
+        dt1 = distance_transform_edt(comp_mask1)
+        dt2 = distance_transform_edt(comp_mask2)
+
+        t1 = 2 * np.median(dt1[dt1 > 0])
+        t2 = 2 * np.median(dt2[dt2 > 0])
+
+        # Average thickness
+        radius = int(max(1, 0.25 * (t1 + t2)))
+
+        # --- Create thin path mask ---
+        path_mask = np.zeros_like(current_mask, dtype=np.uint8)
         for (r, c) in path:
-            cv2.circle(current_mask, (c, r), radius, 1, -1)
+            path_mask[r, c] = 1
+
+        # --- Dilate path to desired thickness ---
+        kernel_size = int(2 * radius + 1)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_size, kernel_size)
+        )
+
+        thick_path = cv2.dilate(path_mask, kernel)
+
+        # Merge
+        current_mask = np.maximum(current_mask, thick_path)
 
     return current_mask.astype(np.uint8)
+
 
 
 
