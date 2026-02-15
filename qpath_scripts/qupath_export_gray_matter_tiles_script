@@ -1,0 +1,110 @@
+import qupath.lib.regions.RegionRequest
+import javax.imageio.ImageIO
+
+def imageData = getCurrentImageData()
+def server = imageData.getServer()
+def hierarchy = imageData.getHierarchy()
+
+def tileSize = 512
+def downsample = 1.0
+
+// --------------------------------------------------
+// Base output directory
+// --------------------------------------------------
+def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled"
+mkdirs(baseOutDir)
+
+// --------------------------------------------------
+// Get current image name (cleaned safely)
+// --------------------------------------------------
+def imageName = imageData.getServer().getMetadata().getName()
+
+int dotIndex = imageName.lastIndexOf(".")
+if (dotIndex > 0) {
+    imageName = imageName.substring(0, dotIndex)
+}
+
+imageName = imageName.replace(" ", "_")
+
+// Create scan-specific subfolder
+def outDir = baseOutDir + File.separator + imageName
+mkdirs(outDir)
+
+print "Exporting GRAY MATTER tiles for scan: ${imageName}"
+print "Output folder: ${outDir}"
+
+int width = server.getWidth()
+int height = server.getHeight()
+
+// --------------------------------------------------
+// All annotations = gray matter
+// --------------------------------------------------
+def grayAnnotations = hierarchy.getAnnotationObjects()
+
+if (grayAnnotations.isEmpty()) {
+    print "WARNING: No annotations found — nothing will be exported."
+}
+
+// --------------------------------------------------
+int tileID = 0
+int checkedTiles = 0
+
+for (int y = 0; y < height; y += tileSize) {
+    for (int x = 0; x < width; x += tileSize) {
+
+        checkedTiles++
+
+        try {
+
+            // ---- Compute tile center first (cheap operation) ----
+            double centerX = x + tileSize / 2.0
+            double centerY = y + tileSize / 2.0
+
+            boolean isGray = false
+            for (ann in grayAnnotations) {
+                if (ann.getROI().contains(centerX, centerY)) {
+                    isGray = true
+                    break
+                }
+            }
+
+            // ---- Skip if not gray matter ----
+            if (!isGray)
+                continue
+
+            // ---- Only read image if gray ----
+            def region = RegionRequest.createInstance(
+                server.getPath(),
+                downsample,
+                x, y,
+                tileSize, tileSize
+            )
+
+            def img = server.readRegion(region)
+            if (img == null)
+                continue
+
+            def outPath = outDir + File.separator +
+                String.format("tile_%05d_x%d_y%d_gray_matter.jpg",
+                              tileID, x, y)
+
+            ImageIO.write(img, "JPEG", new File(outPath))
+            tileID++
+
+            if (tileID % 100 == 0) {
+                print "Exported ${tileID} gray tiles (checked ${checkedTiles})"
+            }
+
+            Thread.sleep(10)
+
+            if (tileID % 1000 == 0) {
+                System.gc()
+            }
+
+        } catch (Exception e) {
+            print "Skipped tile at x=${x}, y=${y}"
+        }
+    }
+}
+
+print "DONE — Exported ${tileID} GRAY MATTER tiles for scan ${imageName}"
