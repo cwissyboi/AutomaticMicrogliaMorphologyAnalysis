@@ -15,7 +15,7 @@ scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 scp -r AnnotationsData ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r YOLO_dataset_rat ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
-
+scp -r All_scans_tiled_subset ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/
 
@@ -24,7 +24,7 @@ scp -r custom_detection ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-u
 scp -r YOLO_dataset_adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 scp -r YOLO_dataset_adjusted_gray ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
-
+scp -r initial_pipeline ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp segmentation_requirements.in ccharlesworth@login.daic.tudelft.nl:~/
 
@@ -40,7 +40,7 @@ scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 Copy a folder from DAIC to computer 
 scp -r [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefolder ./
 
-scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/YOLO_dataset_adjusted ./
+scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/yolo_runs/yolo_output_2026-02-15_16-51-50/weights ./
 
 Home directory /home/nfs/ccharlesworth
 

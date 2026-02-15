@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug main.py (scans_512)",
+            "name": "Debug main.py All_scans_tiled_subset",
             "type": "python",
             "request": "launch",
 
@@ -14,9 +14,9 @@
 
             "args": [
                 "--input_folder_path",
-                "../tiles/scans_512/",
+                "../All_scans_tiled_subset",
                 "--output_name",
-                "scans_512"
+                "All_scans_tiled_subset"
             ],
 
             "justMyCode": false
