@@ -22,8 +22,8 @@ scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staf
 scp -r custom_detection ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/
 
 scp -r YOLO_dataset_adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
-scp -r YOLO_rat_adjusted_1 ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
-dos2unix run_detection_training.sh
+scp -r YOLO_dataset_adjusted_gray ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
+
 
 
 scp segmentation_requirements.in ccharlesworth@login.daic.tudelft.nl:~/
@@ -39,6 +39,8 @@ scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 
 Copy a folder from DAIC to computer 
 scp -r [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefolder ./
+
+scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/YOLO_dataset_adjusted ./
 
 Home directory /home/nfs/ccharlesworth
 

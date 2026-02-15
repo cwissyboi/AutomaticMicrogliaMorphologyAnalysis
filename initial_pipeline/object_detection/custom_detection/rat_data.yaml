@@ -1,4 +1,4 @@
-path: ../../../YOLO_rat_adjusted_1
+path: ../../../YOLO_rat_adjusted_1_gray
 train: images/train
 val: images/val
 test: images/test

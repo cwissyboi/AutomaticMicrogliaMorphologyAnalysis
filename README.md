@@ -81,7 +81,7 @@ pip install -r initial_pipeline_requirements.txt
 
 ```bash
 cd initial_pipeline
-python main.py --input_folder_path ../tiles/slide_2_test/ --output_name slide_2_test
+python main.py --input_folder_path ../tiles/slide_4_512/ --output_name slide_4_512
 ```
 
 ### Arguments

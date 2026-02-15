@@ -3,6 +3,9 @@ from pathlib import Path
 import os
 import cv2
 import numpy as np
+import colorsys
+import numpy as np
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="YOLO inference arguments")
@@ -97,33 +100,63 @@ def get_file_name(file_path):
     return Path(file_path).stem
 
 
-def output_masks_to_file_overlay(output_folder, image_path, masks, image_rgb, suffix = 'sam_outline'):
+def index_to_color(i, total_masks):
+    """
+    Deterministic distinct color for mask i.
+    Evenly spaced in HSV space.
+    Returns RGB tuple (0–255).
+    """
+    if total_masks == 0:
+        return (255, 0, 0)
+
+    hue = i / total_masks
+    saturation = 0.9
+    value = 1.0
+
+    r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+
+    return (
+        int(r * 255),
+        int(g * 255),
+        int(b * 255),
+    )
+
+
+def output_masks_to_file_overlay(
+    output_folder,
+    image_path,
+    masks,
+    image_rgb,
+    suffix='sam_outline'
+):
     os.makedirs(output_folder, exist_ok=True)
 
-    # Copy original image (RGB)
     overlay = image_rgb.copy()
 
+    total_masks = len(masks)
+
     for i, mask in enumerate(masks):
-        # soma_mask is uint8 {0,255} or bool, ensure uint8
+
         mask_uint8 = (mask > 0).astype(np.uint8) * 255
 
-        # Find contours of soma
         contours, _ = cv2.findContours(
             mask_uint8,
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
 
-        # Draw soma contours (blue, slightly thicker)
+        color = index_to_color(i, total_masks)
+
         cv2.drawContours(
             overlay,
             contours,
             contourIdx=-1,
-            color=(0, 0, 255),  # blue soma
-            thickness=2
+            color=color,   # RGB
+            thickness=1
         )
 
-    # Save result
     file_name = get_file_name(image_path)
     out_path = f"{output_folder}{file_name}_{suffix}.jpg"
+
+    # Convert RGB → BGR for cv2 saving
     cv2.imwrite(out_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))

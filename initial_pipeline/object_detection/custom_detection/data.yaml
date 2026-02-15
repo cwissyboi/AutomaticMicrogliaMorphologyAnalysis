@@ -1,4 +1,4 @@
-path: ../../../YOLO_dataset_adjusted
+path: ../../../YOLO_dataset_adjusted_gray
 train: images/train
 val: images/val
 test: images/test

@@ -29,3 +29,5 @@ initial_pipeline/object_detection/custom_detection/rat_yolo_dataset
 YOLO_dataset_rat
 YOLO_rat_adjusted_1
 YOLO_dataset_rat.zip
+YOLO_dataset_adjusted_gray
+YOLO_rat_adjusted_1_gray

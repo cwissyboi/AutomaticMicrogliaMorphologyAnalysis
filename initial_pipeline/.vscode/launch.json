@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug main.py (slide_4_512)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--input_folder_path",
+                "../tiles/slide_4_512/",
+                "--output_name",
+                "slide_4_512"
+            ],
+            "justMyCode": false
+        }
+    ]
+}

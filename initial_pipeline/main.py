@@ -5,6 +5,7 @@ from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_s
 from morphology.morphology_features import get_skeletons, get_morphology_dataframe
 from segmentation.custom_segmentation.training.unet import UNet
 from segmentation.custom_segmentation.segmentation_inference import unet_inference
+from segmentation.custom_segmentation.crf import connect_all_masks
 
 import torch
 import cv2
@@ -76,9 +77,13 @@ def main():
             # sam_masks = sam_inference(sam_predictor, yolo_boxes, image_path,  output_name = output_name, image_rgb = image_rgb, output_to_file=True)
             segmentation_masks = unet_inference(model, yolo_boxes, image_path = image_path,  image_rgb=image_rgb, 
                                                 device = device, output_to_file = True, output_name = output_name, 
-                                                expand_boxes=True)
+                                                expand_boxes=False)
+            
+            # connect componenents of the mask
+            # TO DO: Handle situtaions where they are multipl segmentation_masks
+            connected_masks = connect_all_masks(segmentation_masks, image, image_path, output_to_file = True, output_name = output_name)
             soma_masks = get_gaussian_filter_soma_masks(yolo_boxes, image_path, image_rgb, output_name = output_name,  output_to_file= True)
-            skeletons = get_skeletons(image_rgb, image_path, segmentation_masks, soma_masks, output_to_file = True, output_name = output_name)
+            skeletons = get_skeletons(image_rgb, image_path, connected_masks, soma_masks, output_to_file = True, output_name = output_name)
             results_df = get_morphology_dataframe(segmentation_masks, skeletons, soma_masks, yolo_boxes)
 
             # results_df["image_path"] = image_path
