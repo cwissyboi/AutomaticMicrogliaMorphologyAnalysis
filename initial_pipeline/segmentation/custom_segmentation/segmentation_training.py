@@ -25,6 +25,7 @@ from random_disconnections.random_colour_noise import add_floating_synthetic_fra
 from training.training_utils import set_seed, parse_segmentation_args, save_model_with_timestamp
 from training.segmentation_dataset import SegmentationDataset
 from training.unet import UNet
+from training.cl_dice import soft_cldice_loss, dice_loss
 
 # Setup imports from initial_pipeline (for morphology features)
 from setup_imports import setup_initial_pipeline_path
@@ -124,6 +125,68 @@ def morphology_similarity_score(pred_mask, target_mask, eps=1e-8):
     morphology_score = sum(similarities) / total_weight
     
     return morphology_score
+
+
+class CombinedLoss(nn.Module):
+    """
+    Flexible loss wrapper supporting multiple loss types:
+    - 'bce': Binary Cross Entropy with Logits
+    - 'dice': Dice Loss
+    - 'cldice': Centerline Dice Loss (topology-aware)
+    - 'bce_cldice': Weighted combination of BCE and clDice
+    - 'dice_cldice': Weighted combination of Dice and clDice
+    """
+    def __init__(self, loss_type='bce', alpha=0.5):
+        """
+        Args:
+            loss_type: One of ['bce', 'dice', 'cldice', 'bce_cldice', 'dice_cldice']
+            alpha: Weight for clDice in combined losses (0.0-1.0)
+                   For combined losses: loss = (1-alpha)*base_loss + alpha*cldice_loss
+        """
+        super().__init__()
+        self.loss_type = loss_type
+        self.alpha = alpha
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        
+    def forward(self, logits, target):
+        """
+        Args:
+            logits: Raw model outputs (before sigmoid) - shape (B, C, H, W)
+            target: Ground truth binary masks - shape (B, C, H, W)
+        
+        Returns:
+            Scalar loss value
+        """
+        # Get probabilities for losses that need them
+        probs = torch.sigmoid(logits)
+        
+        if self.loss_type == 'bce':
+            # Standard Binary Cross Entropy
+            return self.bce_loss(logits, target)
+        
+        elif self.loss_type == 'dice':
+            # Dice Loss (negative dice coefficient)
+            # dice_loss from cl_dice.py expects probs, not logits
+            return dice_loss(probs, target).mean()
+        
+        elif self.loss_type == 'cldice':
+            # Pure Centerline Dice Loss
+            return soft_cldice_loss(probs, target).mean()
+        
+        elif self.loss_type == 'bce_cldice':
+            # Combined: BCE + clDice
+            bce = self.bce_loss(logits, target)
+            cldice = soft_cldice_loss(probs, target).mean()
+            return (1 - self.alpha) * bce + self.alpha * cldice
+        
+        elif self.loss_type == 'dice_cldice':
+            # Combined: Dice + clDice
+            dice = dice_loss(probs, target).mean()
+            cldice = soft_cldice_loss(probs, target).mean()
+            return (1 - self.alpha) * dice + self.alpha * cldice
+        
+        else:
+            raise ValueError(f"Unknown loss type: {self.loss_type}")
 
 
 def train_epoch(model, loader, device, optimizer, criterion):
@@ -302,8 +365,11 @@ def main():
         val_loader   = DataLoader(val_ds,   batch_size=16, shuffle=False)
         test_loader  = DataLoader(test_ds,  batch_size=16, shuffle=False)
 
-    
-        criterion = nn.BCEWithLogitsLoss()
+        # Setup loss function based on arguments
+        criterion = CombinedLoss(loss_type=args.loss_type, alpha=args.cldice_alpha)
+        print(f'Using loss function: {args.loss_type}')
+        if args.loss_type in ['bce_cldice', 'dice_cldice']:
+            print(f'  clDice weight (alpha): {args.cldice_alpha}')
     
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f'currently using device: {device}')
@@ -311,8 +377,8 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 100
-        patience = 10
+        max_epochs = args.epochs
+        patience = args.patience
 
         best_dice = -float("inf")
         best_epoch = -1
