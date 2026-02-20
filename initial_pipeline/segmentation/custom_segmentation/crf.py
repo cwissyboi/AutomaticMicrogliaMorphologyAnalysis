@@ -6,6 +6,11 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
 import os
+
+# Setup imports from initial_pipeline
+from setup_imports import setup_initial_pipeline_path
+setup_initial_pipeline_path()
+
 from helpers import get_file_name, output_masks_to_file_overlay
 
 
