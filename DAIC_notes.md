@@ -15,7 +15,9 @@ scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 scp -r AnnotationsData ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r YOLO_dataset_rat ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
-scp -r All_scans_tiled_subset ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
+
+scp -r YOLO_dataset_adjusted_2 ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
+scp -r All_scans_tiled ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/
 
@@ -24,7 +26,7 @@ scp -r custom_detection ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-u
 scp -r YOLO_dataset_adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 scp -r YOLO_dataset_adjusted_gray ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
-scp -r initial_pipeline ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
+scp main.py ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/
 
 scp segmentation_requirements.in ccharlesworth@login.daic.tudelft.nl:~/
 

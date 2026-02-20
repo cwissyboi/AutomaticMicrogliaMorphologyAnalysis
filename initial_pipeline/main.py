@@ -64,7 +64,7 @@ def main():
             if not image_path.is_file():
                 continue
 
-            if (counter > 1000): 
+            if (counter > 100): 
                 break
 
             counter = counter + 1
@@ -99,7 +99,7 @@ def main():
                 image_path=image_path,
                 image_rgb=image_rgb,
                 device=device,
-                output_to_file=False,
+                output_to_file=True,
                 output_name=output_name,
                 expand_boxes=False,
                 scan_folder=scan_folder_name
@@ -115,7 +115,7 @@ def main():
                 segmentation_masks,
                 image,
                 image_path,
-                output_to_file=False,
+                output_to_file=True,
                 output_name=output_name,
                 scan_folder=scan_folder_name
             )
