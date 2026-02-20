@@ -109,7 +109,8 @@ def main():
                 torch.cuda.synchronize()
             timings["unet"] += time.perf_counter() - t0
 
-            # ---------------- CRF / connect ----------------
+            
+
             t0 = time.perf_counter()
             connected_masks = connect_all_masks(
                 segmentation_masks,
@@ -119,6 +120,7 @@ def main():
                 output_name=output_name,
                 scan_folder=scan_folder_name
             )
+            
             timings["crf"] += time.perf_counter() - t0
 
             # ---------------- Gaussian ----------------
@@ -133,7 +135,7 @@ def main():
             )
             timings["gaussian"] += time.perf_counter() - t0
 
-            # ---------------- Skeleton ----------------
+           
             t0 = time.perf_counter()
             skeletons = get_skeletons(
                 image_rgb,
@@ -146,7 +148,7 @@ def main():
             )
             timings["skeleton"] += time.perf_counter() - t0
 
-            # ---------------- DataFrame ----------------
+            
             t0 = time.perf_counter()
             results_df = get_morphology_dataframe(
                 segmentation_masks,

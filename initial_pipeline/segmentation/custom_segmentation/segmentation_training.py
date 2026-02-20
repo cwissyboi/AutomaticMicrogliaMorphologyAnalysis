@@ -147,34 +147,52 @@ def train_epoch(model, loader, device, optimizer, criterion):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, calculate_morphology_metric=False):
+    """
+    Evaluate model on a dataset.
+    
+    Args:
+        model: The segmentation model
+        loader: DataLoader for the dataset
+        device: Device to run evaluation on
+        calculate_morphology_metric: If True, compute morphology similarity score.
+                                     Default False since it's computationally expensive.
+    
+    Returns:
+        Dictionary with dice, iou, and optionally morphology scores
+    """
     model.eval()
-    dice_list, iou_list, morphology_list = [], [], []
+    dice_list, iou_list = [], []
+    morphology_list = [] if calculate_morphology_metric else None
 
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         logits = model(x)
         probs = torch.sigmoid(logits)
 
-        # Pixel-level metrics
+        # Pixel-level metrics (always computed)
         dice_list.append(dice_score(probs, y).item())
         iou_list.append(iou_score(probs, y).item())
         
-        # Morphology-level metric
-        # Compute for each sample in batch
-        batch_size = probs.shape[0]
-        batch_morphology_scores = []
-        for i in range(batch_size):
-            morph_score = morphology_similarity_score(probs[i, 0], y[i, 0])
-            batch_morphology_scores.append(morph_score)
-        
-        morphology_list.extend(batch_morphology_scores)
+        # Morphology-level metric (only if requested)
+        if calculate_morphology_metric:
+            batch_size = probs.shape[0]
+            batch_morphology_scores = []
+            for i in range(batch_size):
+                morph_score = morphology_similarity_score(probs[i, 0], y[i, 0])
+                batch_morphology_scores.append(morph_score)
+            
+            morphology_list.extend(batch_morphology_scores)
 
-    return {
+    results = {
         "dice": sum(dice_list) / len(dice_list),
         "iou": sum(iou_list) / len(iou_list),
-        "morphology": sum(morphology_list) / len(morphology_list),
     }
+    
+    if calculate_morphology_metric:
+        results["morphology"] = sum(morphology_list) / len(morphology_list)
+    
+    return results
 
 
 # Visualize predictions
@@ -293,7 +311,7 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 1
+        max_epochs = 100
         patience = 10
 
         best_dice = -float("inf")
@@ -304,8 +322,9 @@ def main():
 
         for epoch in trange(max_epochs, desc="Training", unit="epoch"):
             train_loss = train_epoch(model, train_loader, device = device, optimizer = optimizer, criterion = criterion)
-            test_metrics = evaluate(model, test_loader, device = device)
-            val_metrics = evaluate(model, val_loader, device = device)
+            # Don't calculate morphology during training (expensive)
+            test_metrics = evaluate(model, test_loader, device = device, calculate_morphology_metric=False)
+            val_metrics = evaluate(model, val_loader, device = device, calculate_morphology_metric=False)
 
             current_dice = val_metrics["dice"]
 
@@ -333,10 +352,8 @@ def main():
                 f"Loss: {train_loss:.4f} | "
                 f"Validation Dice: {current_dice:.4f} | "
                 f"Validation IoU: {val_metrics['iou']:.4f} | "
-                f"Validation Morphology: {val_metrics['morphology']:.4f} | "
                 f"Test Dice: {test_metrics['dice']:.4f} | "
                 f"Test IoU: {test_metrics['iou']:.4f} | "
-                f"Test Morphology: {test_metrics['morphology']:.4f} | "
                 f"{status}"
             )
 
@@ -352,7 +369,8 @@ def main():
         model.load_state_dict(best_state_dict)
         model.to(device)
 
-        final_test_metrics = evaluate(model, test_loader, device)
+        # Final test evaluation - NOW calculate morphology metric
+        final_test_metrics = evaluate(model, test_loader, device, calculate_morphology_metric=True)
         all_fold_metrics.append(final_test_metrics)
 
 

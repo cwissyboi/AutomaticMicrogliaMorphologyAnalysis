@@ -2,7 +2,7 @@
 Connect via ssh using 
 ssh ccharlesworth@login.daic.tudelft.nl
 
-/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
+cd /tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
 
 
 Copy a file from computer to DAIC
