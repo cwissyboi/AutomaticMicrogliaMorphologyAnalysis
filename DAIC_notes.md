@@ -36,6 +36,8 @@ Remove a file
 rm filename
 
 
+python convert_coco_to_annotations.py --input SegmentationAnnotationsAdjusted --output AnnotationsData_Adjusted/Segmentations
+
 Copy a file from DAIC to computer 
 scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 
