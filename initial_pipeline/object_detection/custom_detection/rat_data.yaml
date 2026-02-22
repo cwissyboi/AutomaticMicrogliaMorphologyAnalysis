@@ -1,4 +1,4 @@
-path: ../../../YOLO_rat_adjusted_2_split_with_blue
+path: ../../../YOLO_rat_adjusted_2_split_with_blue_normalized
 train: images/train
 val: images/val
 test: images/test
