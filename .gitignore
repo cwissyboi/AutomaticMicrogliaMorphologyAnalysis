@@ -39,3 +39,5 @@ YOLO_dataset_adjusted_1
 YOLO_dataset_adjusted_2
 AnnotationsData_Adjusted
 initial_pipeline/segmentation/custom_segmentation/mask_quality_summary.csv
+YOLO_rat_adjusted_2
+YOLO_rat_adjusted_2_split

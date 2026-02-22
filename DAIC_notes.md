@@ -20,6 +20,8 @@ scp -r YOLO_dataset_adjusted_2 ccharlesworth@login.daic.tudelft.nl:/tudelft.net/
 scp -r All_scans_tiled ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/
+scp run_segmentation_cldice.sh ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation
+
 
 scp -r custom_detection ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/
 

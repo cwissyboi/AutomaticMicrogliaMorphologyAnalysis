@@ -84,6 +84,10 @@ cd initial_pipeline
 python main.py --input_folder_path ../All_scans_tiled_subset --output_name All_scans_tiled_subset
 ```
 
+
+python segmentation_training.py --loss_type cldice
+
+python segmentation_training.py --loss_type bce_cldice --cldice_alpha 0.5
 python main.py --input_folder_path ../tiles/slide_4_512/ --output_name slide_4_512
 
 ### Arguments
