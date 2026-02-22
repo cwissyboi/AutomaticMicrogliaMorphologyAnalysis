@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python -u segmentation_training.py --add_new_components True --disconnect_components True
+srun python -u segmentation_training.py --add_new_components True --disconnect_components True --loss_type bce_cldice --cldice_alpha 0.5

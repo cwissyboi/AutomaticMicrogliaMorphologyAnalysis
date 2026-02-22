@@ -274,32 +274,34 @@ def main():
 
     print('segmentations ready')
 
-    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData" / "Segmentations"
+    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted" / "Segmentations"
 
     
     path_df = index_segmentations_df(
         SEGMENTATIONS_DIR,
-        mask_name = 'calculated_masks'
+        mask_name = 'masks'
     )
 
-    mask_quality_df = pd.read_csv('mask_quality_summary.csv')
-    mask_quality_df = mask_quality_df[['image_path', 'mask_quality']]
+    # mask_quality_df = pd.read_csv('mask_quality_summary.csv')
+    # mask_quality_df = mask_quality_df[['image_path', 'mask_quality']]
 
 
-    mask_quality_df["image_path"] = mask_quality_df["image_path"].apply(Path)
+    # mask_quality_df["image_path"] = mask_quality_df["image_path"].apply(Path)
 
-    path_df = path_df.merge(mask_quality_df, on = 'image_path', how = 'inner')
-    print(path_df.columns)
+    # path_df = path_df.merge(mask_quality_df, on = 'image_path', how = 'inner')
+    # print(path_df.columns)
 
-    # Only segment the entire cell ie. not just the SOMA
-    path_df = path_df[path_df['class'] == 'MG_whole']
-    # Remove all bad annotations
-    path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
+    # # Only segment the entire cell ie. not just the SOMA
+    # path_df = path_df[path_df['class'] == 'MG_whole']
+    # # Remove all bad annotations
+    # path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
+
+
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
     # path_df = path_df.head(80)
-    # print(len(path_df), "annotation pairs found")
+    print(len(path_df), "annotation pairs found")
 
     k_folds = 5
     kf = KFold(
@@ -451,7 +453,7 @@ def main():
     iou_scores  = [m["iou"]  for m in all_fold_metrics]
     morphology_scores = [m["morphology"] for m in all_fold_metrics]
 
-    print("\n========== Cross-validation results ==========")
+    print("\nCross-validation results")
     print(f"Dice:       {np.mean(dice_scores):.4f} ± {np.std(dice_scores):.4f}")
     print(f"IoU:        {np.mean(iou_scores):.4f} ± {np.std(iou_scores):.4f}")
     print(f"Morphology: {np.mean(morphology_scores):.4f} ± {np.std(morphology_scores):.4f}")
