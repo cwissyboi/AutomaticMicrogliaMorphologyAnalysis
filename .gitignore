@@ -33,7 +33,6 @@ YOLO_dataset_adjusted_gray
 YOLO_rat_adjusted_1_gray
 tiles
 initial_pipeline/segmentation/segmentation_output
-initial_pipeline/object_detection
 All_scans_tiled_subset
 YOLO_dataset_adjusted_1
 YOLO_dataset_adjusted_2
@@ -41,3 +40,5 @@ AnnotationsData_Adjusted
 initial_pipeline/segmentation/custom_segmentation/mask_quality_summary.csv
 YOLO_rat_adjusted_2
 YOLO_rat_adjusted_2_split
+initial_pipeline/object_detection/object_detection_output
+initial_pipeline/object_detection/custom_detection/yolo_good_runs
