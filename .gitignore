@@ -42,3 +42,5 @@ YOLO_rat_adjusted_2
 YOLO_rat_adjusted_2_split
 initial_pipeline/object_detection/object_detection_output
 initial_pipeline/object_detection/custom_detection/yolo_good_runs
+YOLO_rat_adjusted_2_split_with_blue
+YOLO_rat_adjusted_2_with_blue
