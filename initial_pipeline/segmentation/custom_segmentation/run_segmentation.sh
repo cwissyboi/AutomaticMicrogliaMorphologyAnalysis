@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python -u segmentation_training.py --loss_type bce_cldice --cldice_alpha 0.5
+srun python segmentation_training.py --loss_type bce_cldice_betti --cldice_alpha 0.5 --betti_beta 0.3

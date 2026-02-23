@@ -26,6 +26,7 @@ from training.training_utils import set_seed, parse_segmentation_args, save_mode
 from training.segmentation_dataset import SegmentationDataset
 from training.unet import UNet
 from training.cl_dice import soft_cldice_loss, dice_loss
+from training.betti_loss import BettiMatchingLoss
 
 # Setup imports from initial_pipeline (for morphology features)
 from setup_imports import setup_initial_pipeline_path
@@ -133,20 +134,37 @@ class CombinedLoss(nn.Module):
     - 'bce': Binary Cross Entropy with Logits
     - 'dice': Dice Loss
     - 'cldice': Centerline Dice Loss (topology-aware)
+    - 'betti': Betti Matching Loss (component/hole counting)
     - 'bce_cldice': Weighted combination of BCE and clDice
     - 'dice_cldice': Weighted combination of Dice and clDice
+    - 'bce_cldice_betti': Weighted combination of BCE, clDice, and Betti
+    - 'dice_cldice_betti': Weighted combination of Dice, clDice, and Betti
     """
-    def __init__(self, loss_type='bce', alpha=0.5):
+    def __init__(self, loss_type='bce', alpha=0.5, beta=0.3, 
+                 betti_b0_weight=1.0, betti_b1_weight=0.5):
         """
         Args:
-            loss_type: One of ['bce', 'dice', 'cldice', 'bce_cldice', 'dice_cldice']
+            loss_type: One of ['bce', 'dice', 'cldice', 'betti', 
+                               'bce_cldice', 'dice_cldice',
+                               'bce_cldice_betti', 'dice_cldice_betti']
             alpha: Weight for clDice in combined losses (0.0-1.0)
-                   For combined losses: loss = (1-alpha)*base_loss + alpha*cldice_loss
+            beta: Weight for Betti loss in triple combinations (0.0-1.0)
+            betti_b0_weight: Weight for component count (β0) in Betti loss
+            betti_b1_weight: Weight for hole count (β1) in Betti loss
+            
+        For triple combinations (bce_cldice_betti, dice_cldice_betti):
+            loss = (1-alpha-beta)*base_loss + alpha*cldice_loss + beta*betti_loss
         """
         super().__init__()
         self.loss_type = loss_type
         self.alpha = alpha
+        self.beta = beta
         self.bce_loss = nn.BCEWithLogitsLoss()
+        self.betti_loss = BettiMatchingLoss(
+            beta_0_weight=betti_b0_weight,
+            beta_1_weight=betti_b1_weight,
+            soft=False  # Use hard version for now
+        )
         
     def forward(self, logits, target):
         """
@@ -166,12 +184,15 @@ class CombinedLoss(nn.Module):
         
         elif self.loss_type == 'dice':
             # Dice Loss (negative dice coefficient)
-            # dice_loss from cl_dice.py expects probs, not logits
             return dice_loss(probs, target).mean()
         
         elif self.loss_type == 'cldice':
             # Pure Centerline Dice Loss
             return soft_cldice_loss(probs, target).mean()
+        
+        elif self.loss_type == 'betti':
+            # Pure Betti Matching Loss
+            return self.betti_loss(probs, target)
         
         elif self.loss_type == 'bce_cldice':
             # Combined: BCE + clDice
@@ -184,6 +205,20 @@ class CombinedLoss(nn.Module):
             dice = dice_loss(probs, target).mean()
             cldice = soft_cldice_loss(probs, target).mean()
             return (1 - self.alpha) * dice + self.alpha * cldice
+        
+        elif self.loss_type == 'bce_cldice_betti':
+            # Triple combination: BCE + clDice + Betti
+            bce = self.bce_loss(logits, target)
+            cldice = soft_cldice_loss(probs, target).mean()
+            betti = self.betti_loss(probs, target)
+            return (1 - self.alpha - self.beta) * bce + self.alpha * cldice + self.beta * betti
+        
+        elif self.loss_type == 'dice_cldice_betti':
+            # Triple combination: Dice + clDice + Betti
+            dice = dice_loss(probs, target).mean()
+            cldice = soft_cldice_loss(probs, target).mean()
+            betti = self.betti_loss(probs, target)
+            return (1 - self.alpha - self.beta) * dice + self.alpha * cldice + self.beta * betti
         
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
@@ -269,10 +304,9 @@ def main():
     print(args)
 
     set_seed(42)
-    print('preparing segmentations')
-    preprocess_segmentations()
-
-    print('segmentations ready')
+    # print('preparing segmentations')
+    # preprocess_segmentations()
+    # print('segmentations ready')
 
     SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted" / "Segmentations"
 

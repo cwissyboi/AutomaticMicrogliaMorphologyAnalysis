@@ -57,14 +57,31 @@ def parse_segmentation_args():
                     help="Whether to add synthetic fragments augmentation")
     
     parser.add_argument("--loss_type", type=str, default="bce",
-                        choices=["bce", "dice", "cldice", "bce_cldice", "dice_cldice"],
+                        choices=["bce", "dice", "cldice", "betti", 
+                                "bce_cldice", "dice_cldice",
+                                "bce_cldice_betti", "dice_cldice_betti"],
                         help="Loss function type: 'bce' (Binary Cross Entropy), "
                              "'dice' (Dice loss), 'cldice' (Centerline Dice), "
-                             "'bce_cldice' (BCE + clDice), 'dice_cldice' (Dice + clDice)")
+                             "'betti' (Betti Matching - topology), "
+                             "'bce_cldice' (BCE + clDice), 'dice_cldice' (Dice + clDice), "
+                             "'bce_cldice_betti' (BCE + clDice + Betti), "
+                             "'dice_cldice_betti' (Dice + clDice + Betti)")
     
     parser.add_argument("--cldice_alpha", type=float, default=0.5,
                         help="Weight for clDice in combined losses (0.0-1.0). "
-                             "For 'bce_cldice': loss = (1-alpha)*BCE + alpha*clDice. "
-                             "For 'dice_cldice': loss = (1-alpha)*Dice + alpha*clDice")
+                             "For dual combinations: loss = (1-alpha)*base + alpha*clDice. "
+                             "For triple combinations: loss = (1-alpha-beta)*base + alpha*clDice + beta*Betti")
+    
+    parser.add_argument("--betti_beta", type=float, default=0.3,
+                        help="Weight for Betti loss in triple combinations (0.0-1.0). "
+                             "Only used for 'bce_cldice_betti' and 'dice_cldice_betti'")
+    
+    parser.add_argument("--betti_b0_weight", type=float, default=1.0,
+                        help="Weight for component count (β0) in Betti loss. "
+                             "Higher values penalize wrong number of components more")
+    
+    parser.add_argument("--betti_b1_weight", type=float, default=0.5,
+                        help="Weight for hole count (β1) in Betti loss. "
+                             "Higher values penalize wrong number of holes more")
     
     return parser.parse_args()
