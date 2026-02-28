@@ -344,7 +344,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
-    # path_df = path_df.head(80)
+    # path_df = path_df.head(40)
     print(len(path_df), "annotation pairs found")
 
     k_folds = 5
@@ -354,6 +354,7 @@ def main():
         random_state=42
     )
     all_fold_metrics = []
+    all_fold_region_metrics = []
 
     train_tfms = A.Compose([
         A.Resize(256, 256),
@@ -507,6 +508,7 @@ def main():
             
             if region_results is not None:
                 print_metrics_summary(region_results)
+                all_fold_region_metrics.append(region_results)
             else:
                 print("\nRegion-based evaluation returned None (no soma masks found)")
         except Exception as e:
@@ -521,10 +523,66 @@ def main():
     iou_scores  = [m["iou"]  for m in all_fold_metrics]
     morphology_scores = [m["morphology"] for m in all_fold_metrics]
 
-    print("\nCross-validation results")
+    print("\n" + "="*70)
+    print("CROSS-VALIDATION RESULTS (Standard Metrics)")
+    print("="*70)
     print(f"Dice:       {np.mean(dice_scores):.4f} ± {np.std(dice_scores):.4f}")
     print(f"IoU:        {np.mean(iou_scores):.4f} ± {np.std(iou_scores):.4f}")
     print(f"Morphology: {np.mean(morphology_scores):.4f} ± {np.std(morphology_scores):.4f}")
+    
+    # Aggregate and print region-based metrics across all folds
+    if all_fold_region_metrics:
+        print("\n" + "="*70)
+        print("CROSS-VALIDATION RESULTS (Region-Based Metrics)")
+        print("="*70)
+        print(f"Based on {len(all_fold_region_metrics)} folds with region annotations\n")
+        
+        # Overall metrics (whole cell)
+        overall_dice = [fold['overall']['dice_mean'] for fold in all_fold_region_metrics]
+        overall_iou = [fold['overall']['iou_mean'] for fold in all_fold_region_metrics]
+        overall_precision = [fold['overall']['precision_mean'] for fold in all_fold_region_metrics]
+        overall_recall = [fold['overall']['recall_mean'] for fold in all_fold_region_metrics]
+        
+        print("OVERALL (Entire Cell):")
+        print(f"  Dice:      {np.mean(overall_dice):.4f} ± {np.std(overall_dice):.4f}")
+        print(f"  IoU:       {np.mean(overall_iou):.4f} ± {np.std(overall_iou):.4f}")
+        print(f"  Precision: {np.mean(overall_precision):.4f} ± {np.std(overall_precision):.4f}")
+        print(f"  Recall:    {np.mean(overall_recall):.4f} ± {np.std(overall_recall):.4f}")
+        
+        # Soma metrics (only if available in all folds)
+        if all('soma' in fold for fold in all_fold_region_metrics):
+            soma_recall = [fold['soma']['recall_mean'] for fold in all_fold_region_metrics]
+            soma_sample_count = [fold['soma']['sample_count'] for fold in all_fold_region_metrics]
+            soma_pixel_count = [fold['soma']['avg_pixel_count'] for fold in all_fold_region_metrics]
+            
+            print("\nSOMA (Cell Body) - RECALL ONLY:")
+            print(f"  Avg Samples per Fold: {np.mean(soma_sample_count):.1f}")
+            print(f"  Avg Pixels:           {np.mean(soma_pixel_count):.0f}")
+            print(f"  Recall:               {np.mean(soma_recall):.4f} ± {np.std(soma_recall):.4f}")
+            print(f"  (Proportion of GT soma pixels captured by prediction)")
+        
+        # Branches metrics (only if available in all folds)
+        if all('branches' in fold for fold in all_fold_region_metrics):
+            branches_dice = [fold['branches']['dice_mean'] for fold in all_fold_region_metrics]
+            branches_iou = [fold['branches']['iou_mean'] for fold in all_fold_region_metrics]
+            branches_precision = [fold['branches']['precision_mean'] for fold in all_fold_region_metrics]
+            branches_recall = [fold['branches']['recall_mean'] for fold in all_fold_region_metrics]
+            branches_sample_count = [fold['branches']['sample_count'] for fold in all_fold_region_metrics]
+            branches_pixel_count = [fold['branches']['avg_pixel_count'] for fold in all_fold_region_metrics]
+            
+            print("\nBRANCHES (Arms/Processes) - FULL METRICS:")
+            print(f"  Avg Samples per Fold: {np.mean(branches_sample_count):.1f}")
+            print(f"  Avg Pixels:           {np.mean(branches_pixel_count):.0f}")
+            print(f"  Dice:                 {np.mean(branches_dice):.4f} ± {np.std(branches_dice):.4f}")
+            print(f"  IoU:                  {np.mean(branches_iou):.4f} ± {np.std(branches_iou):.4f}")
+            print(f"  Precision:            {np.mean(branches_precision):.4f} ± {np.std(branches_precision):.4f}")
+            print(f"  Recall:               {np.mean(branches_recall):.4f} ± {np.std(branches_recall):.4f}")
+            print(f"  (Predictions outside soma region vs GT branches)")
+        
+        print("="*70 + "\n")
+    else:
+        print("\nNo region-based metrics were computed (no soma masks found in any fold)")
+
 
 
 if __name__ == "__main__":

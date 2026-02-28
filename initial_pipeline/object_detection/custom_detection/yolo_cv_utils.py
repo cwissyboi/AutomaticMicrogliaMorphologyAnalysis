@@ -8,6 +8,7 @@ import random
 import numpy as np
 import yaml
 import shutil
+import gc
 from pathlib import Path
 from datetime import datetime
 from sklearn.model_selection import KFold
@@ -22,6 +23,26 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(RANDOM_SEED)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def cleanup_memory():
+    """Clean up GPU and CPU memory."""
+    print("\nCleaning up memory...")
+    
+    # Clear Python garbage collector
+    gc.collect()
+    
+    # Clear PyTorch cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
+        # Print memory stats
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print(f"  GPU memory - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB")
+    
+    print("Memory cleanup complete.")
 
 
 def print_yolo_metrics(metrics, fold=None):
@@ -286,6 +307,9 @@ def train_fold(fold_num, yaml_path, device, runs_dir, timestamp, yolo_starting_m
     
     print_yolo_metrics(metrics, fold=fold_num)
     
+    # Clean up memory before returning
+    cleanup_memory()
+    
     return metrics, best_path
 
 
@@ -373,6 +397,9 @@ def run_kfold_cv(data_yaml_path, runs_dir, device, train_ratio=0.7, val_ratio=0.
                                        train_params=train_params)
         all_metrics.append(metrics)
         best_paths.append((fold_num, best_path))
+        
+        # Additional cleanup between folds
+        cleanup_memory()
 
     # Aggregate and display results
     aggregate_metrics(all_metrics)
