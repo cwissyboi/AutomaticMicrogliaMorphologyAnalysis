@@ -109,12 +109,31 @@ def copy_file_pair(image_path, dest_images_dir, dest_labels_dir):
         print(f"  Dest dir: {dest_images_dir} (exists: {dest_images_dir.exists()})")
         raise
     
-    # Copy label (assuming same name with .txt extension)
-    label_path = image_path.parent.parent / 'labels' / image_path.parent.name / f"{image_path.stem}.txt"
+    # Copy label file
+    # Image path structure: .../dataset_root/images/train/image.png
+    # Label path structure: .../dataset_root/labels/train/image.txt
+    # We need to replace 'images' with 'labels' in the path
+    
+    # Get the parts of the image path
+    image_parts = image_path.parts
+    
+    # Find the 'images' directory in the path and replace it with 'labels'
+    label_parts = list(image_parts)
+    for i, part in enumerate(label_parts):
+        if part == 'images':
+            label_parts[i] = 'labels'
+            break
+    
+    # Construct label path and change extension to .txt
+    label_path = Path(*label_parts).with_suffix('.txt')
+    
     if label_path.exists():
         dest_label = dest_labels_dir / label_path.name
         os.makedirs(str(dest_labels_dir), exist_ok=True)
         shutil.copy2(str(label_path), str(dest_label))
+    else:
+        print(f"WARNING: Label not found for {image_path.name}")
+        print(f"  Expected: {label_path}")
 
 
 def create_fold_yaml(fold_dir, data_config, fold_num):
