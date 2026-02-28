@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
-#SBATCH --output=run_segmentation.out
+#SBATCH --output=run_segmentation_bce_cldice.out
 #SBATCH --error=.err
 #SBATCH --mail-type=END
 
@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python segmentation_training.py --loss_type bce_cldice_betti --cldice_alpha 0.4 --betti_beta 0.2
+srun python segmentation_training.py --loss_type bce_cldice --cldice_alpha 0.5

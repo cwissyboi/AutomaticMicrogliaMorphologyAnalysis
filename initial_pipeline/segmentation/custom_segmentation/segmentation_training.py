@@ -344,7 +344,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
-    path_df = path_df.head(80)
+    # path_df = path_df.head(80)
     print(len(path_df), "annotation pairs found")
 
     k_folds = 5
@@ -407,7 +407,7 @@ def main():
             add_new_components=False
         )
 
-        batch_size = 1
+        batch_size = 16
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
         test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
@@ -424,7 +424,7 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 1
+        max_epochs = 100
         patience = 10
 
         best_dice = -float("inf")
