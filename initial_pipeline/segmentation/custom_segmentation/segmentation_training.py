@@ -3,21 +3,19 @@ import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import KFold, train_test_split
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
 from datetime import datetime
 import os
-import torch
 from tqdm import trange, tqdm
 import matplotlib.pyplot as plt
-import torch
 import cv2
+import torchvision.transforms.functional as TF
 from segmentation_preprocessing import preprocess_segmentations
 from random_disconnections.disconnect_components import disconnect_branches_with_gap
 from random_disconnections.find_connection_points import find_random_branch_points
@@ -35,6 +33,8 @@ from training.evaluation import (
     iou_score,
     morphology_similarity_score
 )
+from crf import connect_components_adaptive
+from training.printing_utils import print_all_cross_validation_results
 
 # Setup imports from initial_pipeline (for morphology features)
 from setup_imports import setup_initial_pipeline_path
@@ -159,7 +159,7 @@ def train_epoch(model, loader, device, optimizer, criterion):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, calculate_morphology_metric=False):
+def evaluate(model, loader, device, calculate_morphology_metric=False, apply_postprocessing=False):
     """
     Evaluate model on a dataset.
     
@@ -169,6 +169,9 @@ def evaluate(model, loader, device, calculate_morphology_metric=False):
         device: Device to run evaluation on
         calculate_morphology_metric: If True, compute morphology similarity score.
                                      Default False since it's computationally expensive.
+        apply_postprocessing: If True, apply connect_components_adaptive to predictions
+                             before computing metrics (mimics inference pipeline).
+                             Default False.
     
     Returns:
         Dictionary with dice, iou, and optionally morphology scores
@@ -181,20 +184,38 @@ def evaluate(model, loader, device, calculate_morphology_metric=False):
         x, y = x.to(device), y.to(device)
         logits = model(x)
         probs = torch.sigmoid(logits)
-
-        # Pixel-level metrics (always computed)
-        dice_list.append(dice_score(probs, y).item())
-        iou_list.append(iou_score(probs, y).item())
         
-        # Morphology-level metric (only if requested)
-        if calculate_morphology_metric:
-            batch_size = probs.shape[0]
-            batch_morphology_scores = []
-            for i in range(batch_size):
-                morph_score = morphology_similarity_score(probs[i, 0], y[i, 0])
-                batch_morphology_scores.append(morph_score)
+        batch_size = probs.shape[0]
+        
+        # Process each sample in the batch
+        for i in range(batch_size):
+            pred = probs[i, 0]  # [H, W]
+            target = y[i, 0]    # [H, W]
             
-            morphology_list.extend(batch_morphology_scores)
+            # Apply postprocessing if requested
+            if apply_postprocessing:
+                # Convert to numpy
+                pred_np = (pred > 0.5).cpu().numpy().astype(np.uint8)
+                img_np = (x[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                
+                # Apply postprocessing (connect components)
+                connected_mask = connect_components_adaptive(
+                    pred_np, 
+                    img_np, 
+                    min_component_frac=0.0
+                )
+                
+                # Convert back to tensor
+                pred = torch.from_numpy(connected_mask).float().to(device)
+            
+            # Compute metrics
+            dice_list.append(dice_score(pred.unsqueeze(0), target.unsqueeze(0)).item())
+            iou_list.append(iou_score(pred.unsqueeze(0), target.unsqueeze(0)).item())
+            
+            # Morphology-level metric (only if requested)
+            if calculate_morphology_metric:
+                morph_score = morphology_similarity_score(pred, target)
+                morphology_list.append(morph_score)
 
     results = {
         "dice": sum(dice_list) / len(dice_list),
@@ -208,7 +229,7 @@ def evaluate(model, loader, device, calculate_morphology_metric=False):
 
 
 @torch.no_grad()
-def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_size=256, threshold=0.5):
+def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_size=256, threshold=0.5, apply_postprocessing=False):
     """
     Evaluate model on test set with region-based metrics (soma vs branches).
     
@@ -222,12 +243,13 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
         training_data_dir: The directory used for training (to auto-detect WithSoma usage)
         img_size: Image size for model input (default: 256)
         threshold: Threshold for binarizing predictions (default: 0.5)
+        apply_postprocessing: If True, apply connect_components_adaptive to predictions
+                             before computing metrics (mimics inference pipeline).
+                             Default False.
         
     Returns:
         Dictionary with aggregated metrics from aggregate_metrics()
     """
-    import torchvision.transforms.functional as TF
-    
     model.eval()
     
     # Get unique image paths from test set
@@ -247,7 +269,8 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
         return None
     
     soma_count = test_paired_df['soma_mask_path'].notna().sum()
-    print("\nREGION-BASED EVALUATION ON TEST SET")
+    postprocessing_label = " (WITH POSTPROCESSING)" if apply_postprocessing else ""
+    print(f"\nREGION-BASED EVALUATION ON TEST SET{postprocessing_label}")
     print(f"Test samples: {len(test_paired_df)} (expected: {len(test_df)})")
     print(f"Samples with soma masks: {soma_count}/{len(test_paired_df)}")
     
@@ -270,6 +293,20 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
             pred = torch.sigmoid(pred)
         
         pred = pred.squeeze(0).squeeze(0)  # [H, W]
+        
+        # Apply postprocessing if requested
+        if apply_postprocessing:
+            pred_np = (pred > threshold).cpu().numpy().astype(np.uint8)
+            img_np = (img_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            
+            connected_mask = connect_components_adaptive(
+                pred_np,
+                img_np,
+                min_component_frac=0.0
+            )
+            
+            # Convert back to tensor
+            pred = torch.from_numpy(connected_mask).float()
         
         # Load ground truth masks
         whole_mask = Image.open(row['whole_mask_path']).convert('L')
@@ -344,7 +381,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
-    # path_df = path_df.head(40)
+    path_df = path_df.head(20)
     print(len(path_df), "annotation pairs found")
 
     k_folds = 5
@@ -355,6 +392,8 @@ def main():
     )
     all_fold_metrics = []
     all_fold_region_metrics = []
+    all_fold_postprocessed_metrics = []
+    all_fold_postprocessed_region_metrics = []
 
     train_tfms = A.Compose([
         A.Resize(256, 256),
@@ -408,7 +447,7 @@ def main():
             add_new_components=False
         )
 
-        batch_size = 16
+        batch_size = 1
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
         test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
@@ -425,7 +464,7 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 100
+        max_epochs = 1
         patience = 10
 
         best_dice = -float("inf")
@@ -517,71 +556,70 @@ def main():
             import traceback
             traceback.print_exc()
             print("!!! Continuing to next fold...\n")
-
-
-    dice_scores = [m["dice"] for m in all_fold_metrics]
-    iou_scores  = [m["iou"]  for m in all_fold_metrics]
-    morphology_scores = [m["morphology"] for m in all_fold_metrics]
-
-    print("\n" + "="*70)
-    print("CROSS-VALIDATION RESULTS (Standard Metrics)")
-    print("="*70)
-    print(f"Dice:       {np.mean(dice_scores):.4f} ± {np.std(dice_scores):.4f}")
-    print(f"IoU:        {np.mean(iou_scores):.4f} ± {np.std(iou_scores):.4f}")
-    print(f"Morphology: {np.mean(morphology_scores):.4f} ± {np.std(morphology_scores):.4f}")
-    
-    # Aggregate and print region-based metrics across all folds
-    if all_fold_region_metrics:
+        
+        # ========================================================================
+        # POSTPROCESSED EVALUATION
+        # ========================================================================
         print("\n" + "="*70)
-        print("CROSS-VALIDATION RESULTS (Region-Based Metrics)")
+        print("EVALUATING WITH POSTPROCESSING (connect_all_masks)")
         print("="*70)
-        print(f"Based on {len(all_fold_region_metrics)} folds with region annotations\n")
         
-        # Overall metrics (whole cell)
-        overall_dice = [fold['overall']['dice_mean'] for fold in all_fold_region_metrics]
-        overall_iou = [fold['overall']['iou_mean'] for fold in all_fold_region_metrics]
-        overall_precision = [fold['overall']['precision_mean'] for fold in all_fold_region_metrics]
-        overall_recall = [fold['overall']['recall_mean'] for fold in all_fold_region_metrics]
-        
-        print("OVERALL (Entire Cell):")
-        print(f"  Dice:      {np.mean(overall_dice):.4f} ± {np.std(overall_dice):.4f}")
-        print(f"  IoU:       {np.mean(overall_iou):.4f} ± {np.std(overall_iou):.4f}")
-        print(f"  Precision: {np.mean(overall_precision):.4f} ± {np.std(overall_precision):.4f}")
-        print(f"  Recall:    {np.mean(overall_recall):.4f} ± {np.std(overall_recall):.4f}")
-        
-        # Soma metrics (only if available in all folds)
-        if all('soma' in fold for fold in all_fold_region_metrics):
-            soma_recall = [fold['soma']['recall_mean'] for fold in all_fold_region_metrics]
-            soma_sample_count = [fold['soma']['sample_count'] for fold in all_fold_region_metrics]
-            soma_pixel_count = [fold['soma']['avg_pixel_count'] for fold in all_fold_region_metrics]
+        # Standard metrics with postprocessing
+        try:
+            postprocessed_metrics = evaluate(
+                model, test_loader, device, 
+                calculate_morphology_metric=True,
+                apply_postprocessing=True
+            )
+            all_fold_postprocessed_metrics.append(postprocessed_metrics)
             
-            print("\nSOMA (Cell Body) - RECALL ONLY:")
-            print(f"  Avg Samples per Fold: {np.mean(soma_sample_count):.1f}")
-            print(f"  Avg Pixels:           {np.mean(soma_pixel_count):.0f}")
-            print(f"  Recall:               {np.mean(soma_recall):.4f} ± {np.std(soma_recall):.4f}")
-            print(f"  (Proportion of GT soma pixels captured by prediction)")
+            print(
+                f"Fold {fold + 1} postprocessed test | "
+                f"Dice: {postprocessed_metrics['dice']:.4f}, "
+                f"IoU: {postprocessed_metrics['iou']:.4f}, "
+                f"Morphology: {postprocessed_metrics['morphology']:.4f}"
+            )
+        except Exception as e:
+            print(f"\n!!! ERROR in postprocessed evaluation: {e}")
+            print(f"!!! Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("!!! Continuing to next fold...\n")
         
-        # Branches metrics (only if available in all folds)
-        if all('branches' in fold for fold in all_fold_region_metrics):
-            branches_dice = [fold['branches']['dice_mean'] for fold in all_fold_region_metrics]
-            branches_iou = [fold['branches']['iou_mean'] for fold in all_fold_region_metrics]
-            branches_precision = [fold['branches']['precision_mean'] for fold in all_fold_region_metrics]
-            branches_recall = [fold['branches']['recall_mean'] for fold in all_fold_region_metrics]
-            branches_sample_count = [fold['branches']['sample_count'] for fold in all_fold_region_metrics]
-            branches_pixel_count = [fold['branches']['avg_pixel_count'] for fold in all_fold_region_metrics]
+        # Region-based evaluation with postprocessing
+        try:
+            postprocessed_region_results = evaluate_test_with_regions(
+                model=model,
+                test_df=test_df,
+                device=device,
+                training_data_dir=SEGMENTATIONS_DIR,
+                img_size=256,
+                threshold=0.5,
+                apply_postprocessing=True
+            )
             
-            print("\nBRANCHES (Arms/Processes) - FULL METRICS:")
-            print(f"  Avg Samples per Fold: {np.mean(branches_sample_count):.1f}")
-            print(f"  Avg Pixels:           {np.mean(branches_pixel_count):.0f}")
-            print(f"  Dice:                 {np.mean(branches_dice):.4f} ± {np.std(branches_dice):.4f}")
-            print(f"  IoU:                  {np.mean(branches_iou):.4f} ± {np.std(branches_iou):.4f}")
-            print(f"  Precision:            {np.mean(branches_precision):.4f} ± {np.std(branches_precision):.4f}")
-            print(f"  Recall:               {np.mean(branches_recall):.4f} ± {np.std(branches_recall):.4f}")
-            print(f"  (Predictions outside soma region vs GT branches)")
+            if postprocessed_region_results is not None:
+                print_metrics_summary(postprocessed_region_results)
+                all_fold_postprocessed_region_metrics.append(postprocessed_region_results)
+            else:
+                print("\nPostprocessed region-based evaluation returned None (no soma masks found)")
+        except Exception as e:
+            print(f"\n!!! ERROR in postprocessed region-based evaluation: {e}")
+            print(f"!!! Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("!!! Continuing to next fold...\n")
         
         print("="*70 + "\n")
-    else:
-        print("\nNo region-based metrics were computed (no soma masks found in any fold)")
+
+
+    # Print all cross-validation results using the extracted printing utilities
+    print_all_cross_validation_results(
+        all_fold_metrics=all_fold_metrics,
+        all_fold_region_metrics=all_fold_region_metrics,
+        all_fold_postprocessed_metrics=all_fold_postprocessed_metrics,
+        all_fold_postprocessed_region_metrics=all_fold_postprocessed_region_metrics
+    )
 
 
 
