@@ -1,4 +1,4 @@
-from data_utils import index_segmentations_df
+from data_utils import index_segmentations_df, pair_whole_and_soma_masks
 import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import KFold, train_test_split
@@ -27,105 +27,19 @@ from training.segmentation_dataset import SegmentationDataset
 from training.unet import UNet
 from training.cl_dice import soft_cldice_loss, dice_loss
 from training.betti_loss import BettiMatchingLoss
+from training.evaluation import (
+    evaluate_regions, 
+    aggregate_metrics, 
+    print_metrics_summary,
+    dice_score,
+    iou_score,
+    morphology_similarity_score
+)
 
 # Setup imports from initial_pipeline (for morphology features)
 from setup_imports import setup_initial_pipeline_path
 setup_initial_pipeline_path()
 
-from morphology.morphology_features import (
-    compute_skeleton_length,
-    compute_branch_count,
-    compute_skeleton_components,
-    compute_mask_area
-)
-
-from skimage.morphology import skeletonize
-
-
-def dice_score(pred, target, eps=1e-6):
-    pred = (pred > 0.5).float()
-    inter = (pred * target).sum()
-    union = pred.sum() + target.sum()
-    return (2 * inter + eps) / (union + eps)
-
-def iou_score(pred, target, eps=1e-6):
-    pred = (pred > 0.5).float()
-    inter = (pred * target).sum()
-    union = pred.sum() + target.sum() - inter
-    return (inter + eps) / (union + eps)
-
-
-def morphology_similarity_score(pred_mask, target_mask, eps=1e-8):
-    """
-    Compute morphological feature similarity between predicted and target masks.
-    
-    This compares key morphological features:
-    - num_branches: critical for microglia phenotype
-    - num_components: detects fragmentation
-    - length_pixels: overall skeleton length
-    - cell_area: overall cell size
-    
-    Returns a score in [0, 1] where 1 is perfect similarity.
-    """
-    # Convert to numpy and binary
-    pred_np = (pred_mask > 0.5).cpu().numpy().astype(bool)
-    target_np = (target_mask > 0.5).cpu().numpy().astype(bool)
-    
-    # Check if masks are empty
-    if not pred_np.any() or not target_np.any():
-        return 0.0
-    
-    # Compute skeletons
-    try:
-        pred_skel = skeletonize(pred_np)
-        target_skel = skeletonize(target_np)
-    except:
-        return 0.0
-    
-    # Extract morphological features
-    pred_features = {
-        'num_branches': compute_branch_count(pred_skel),
-        'num_components': compute_skeleton_components(pred_skel),
-        'length_pixels': compute_skeleton_length(pred_skel),
-        'cell_area': compute_mask_area(pred_np),
-    }
-    
-    target_features = {
-        'num_branches': compute_branch_count(target_skel),
-        'num_components': compute_skeleton_components(target_skel),
-        'length_pixels': compute_skeleton_length(target_skel),
-        'cell_area': compute_mask_area(target_np),
-    }
-    
-    # Compute normalized similarity for each feature
-    # Using symmetric relative error: |pred - target| / (pred + target)
-    similarities = []
-    weights = {
-        'num_branches': 2.0,      # Most important for phenotype
-        'num_components': 1.5,    # Important for detecting fragmentation
-        'length_pixels': 1.0,     # Standard weight
-        'cell_area': 1.0,         # Standard weight
-    }
-    
-    for feature_name in pred_features.keys():
-        pred_val = pred_features[feature_name]
-        target_val = target_features[feature_name]
-        weight = weights[feature_name]
-        
-        # Symmetric relative error
-        if pred_val + target_val > 0:
-            rel_error = abs(pred_val - target_val) / (pred_val + target_val + eps)
-            similarity = 1.0 / (1.0 + rel_error)  # Convert to similarity [0, 1]
-        else:
-            similarity = 1.0  # Both are 0
-        
-        similarities.append(weight * similarity)
-    
-    # Weighted average
-    total_weight = sum(weights.values())
-    morphology_score = sum(similarities) / total_weight
-    
-    return morphology_score
 
 
 class CombinedLoss(nn.Module):
@@ -293,22 +207,118 @@ def evaluate(model, loader, device, calculate_morphology_metric=False):
     return results
 
 
+@torch.no_grad()
+def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_size=256, threshold=0.5):
+    """
+    Evaluate model on test set with region-based metrics (soma vs branches).
+    
+    This function loads the test data with paired soma masks from the WithSoma dataset,
+    runs inference, and computes metrics separately for soma and branches regions.
+    
+    Args:
+        model: Trained segmentation model
+        test_df: Test DataFrame with image paths to evaluate
+        device: Device to run inference on
+        training_data_dir: The directory used for training (to auto-detect WithSoma usage)
+        img_size: Image size for model input (default: 256)
+        threshold: Threshold for binarizing predictions (default: 0.5)
+        
+    Returns:
+        Dictionary with aggregated metrics from aggregate_metrics()
+    """
+    import torchvision.transforms.functional as TF
+    
+    model.eval()
+    
+    # Get unique image paths from test set
+    test_image_paths = set(test_df['image_path'].tolist())
+    
+    # Load paired whole and soma masks
+    paired_df = pair_whole_and_soma_masks(training_data_dir)
+    
+    # Filter to only test images (by exact image path match)
+    test_paired_df = paired_df[paired_df['image_path'].isin(test_image_paths)].reset_index(drop=True)
+    
+    if len(test_paired_df) == 0:
+        print(f"\nWarning: No samples found in dataset for test images")
+        print(f"Test set has {len(test_df)} images")
+        print(f"Paired dataset has {len(paired_df)} images")
+        print("Skipping region-based evaluation.")
+        return None
+    
+    soma_count = test_paired_df['soma_mask_path'].notna().sum()
+    print("\nREGION-BASED EVALUATION ON TEST SET")
+    print(f"Test samples: {len(test_paired_df)} (expected: {len(test_df)})")
+    print(f"Samples with soma masks: {soma_count}/{len(test_paired_df)}")
+    
+    all_metrics = []
+    
+    for idx, row in test_paired_df.iterrows():
+        # Load image
+        img = Image.open(row['image_path']).convert('RGB')
+        img_tensor = TF.to_tensor(img).unsqueeze(0).to(device)  # [1, 3, H, W]
+        
+        # Verify size (should already be 512x512)
+        if img_tensor.shape[2] != img_size or img_tensor.shape[3] != img_size:
+            img_tensor = TF.resize(img_tensor, [img_size, img_size])
+        
+        # Run inference
+        pred = model(img_tensor)  # [1, 1, H, W]
+        
+        # Apply sigmoid if output is logits
+        if pred.min() < 0 or pred.max() > 1:
+            pred = torch.sigmoid(pred)
+        
+        pred = pred.squeeze(0).squeeze(0)  # [H, W]
+        
+        # Load ground truth masks
+        whole_mask = Image.open(row['whole_mask_path']).convert('L')
+        whole_mask_tensor = TF.to_tensor(whole_mask).squeeze(0)  # [H, W]
+        
+        # Verify size (should already be 512x512)
+        if whole_mask_tensor.shape[0] != img_size or whole_mask_tensor.shape[1] != img_size:
+            whole_mask_tensor = TF.resize(whole_mask_tensor.unsqueeze(0), [img_size, img_size]).squeeze(0)
+        
+        # Load soma mask if available
+        soma_mask_tensor = None
+        if pd.notna(row['soma_mask_path']):
+            soma_mask = Image.open(row['soma_mask_path']).convert('L')
+            soma_mask_tensor = TF.to_tensor(soma_mask).squeeze(0)  # [H, W]
+            
+            # Verify size (should already be 512x512)
+            if soma_mask_tensor.shape[0] != img_size or soma_mask_tensor.shape[1] != img_size:
+                soma_mask_tensor = TF.resize(soma_mask_tensor.unsqueeze(0), [img_size, img_size]).squeeze(0)
+        
+        # Evaluate with region-based metrics
+        metrics = evaluate_regions(
+            pred=pred,
+            whole_cell_mask=whole_mask_tensor,
+            soma_mask=soma_mask_tensor,
+            threshold=threshold
+        )
+        
+        all_metrics.append(metrics)
+    
+    # Aggregate metrics
+    results = aggregate_metrics(all_metrics)
+    
+    return results
+
+
 # Visualize predictions
 
-def main(): 
+def main():
     args = parse_segmentation_args()
 
-    print('arg value')
     disconnect_components = args.disconnect_components
     add_new_components = args.add_new_components
-    print(args)
 
     set_seed(42)
     # print('preparing segmentations')
     # preprocess_segmentations()
     # print('segmentations ready')
 
-    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted" / "Segmentations"
+    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted_WithSoma" / "Segmentations"
 
     
     path_df = index_segmentations_df(
@@ -325,8 +335,8 @@ def main():
     # path_df = path_df.merge(mask_quality_df, on = 'image_path', how = 'inner')
     # print(path_df.columns)
 
-    # # Only segment the entire cell ie. not just the SOMA
-    # path_df = path_df[path_df['class'] == 'MG_whole']
+    # Only segment the entire cell ie. not just the SOMA
+    path_df = path_df[path_df['class'] == 'MG_whole']
     # # Remove all bad annotations
     # path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
 
@@ -334,7 +344,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
-    # path_df = path_df.head(80)
+    path_df = path_df.head(80)
     print(len(path_df), "annotation pairs found")
 
     k_folds = 5
@@ -397,9 +407,10 @@ def main():
             add_new_components=False
         )
 
-        train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
-        val_loader   = DataLoader(val_ds,   batch_size=16, shuffle=False)
-        test_loader  = DataLoader(test_ds,  batch_size=16, shuffle=False)
+        batch_size = 1
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+        val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
+        test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
 
         # Setup loss function based on arguments
         criterion = CombinedLoss(loss_type=args.loss_type, alpha=args.cldice_alpha)
@@ -413,8 +424,8 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = args.epochs
-        patience = args.patience
+        max_epochs = 1
+        patience = 10
 
         best_dice = -float("inf")
         best_epoch = -1
@@ -482,6 +493,29 @@ def main():
             f"IoU: {final_test_metrics['iou']:.4f}, "
             f"Morphology: {final_test_metrics['morphology']:.4f}"
         )
+        
+        # Region-based evaluation (soma vs branches) on test set
+        try:
+            region_results = evaluate_test_with_regions(
+                model=model,
+                test_df=test_df,
+                device=device,
+                training_data_dir=SEGMENTATIONS_DIR,
+                img_size=256,
+                threshold=0.5
+            )
+            
+            if region_results is not None:
+                print_metrics_summary(region_results)
+            else:
+                print("\nRegion-based evaluation returned None (no soma masks found)")
+        except Exception as e:
+            print(f"\n!!! ERROR in region-based evaluation: {e}")
+            print(f"!!! Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("!!! Continuing to next fold...\n")
+
 
     dice_scores = [m["dice"] for m in all_fold_metrics]
     iou_scores  = [m["iou"]  for m in all_fold_metrics]

@@ -13,22 +13,26 @@ import javax.imageio.ImageIO
 // ================= USER SETTINGS =================
 def outDir = "C:/Users/chris/Desktop/University/Thesis/AnnotationsData/Segmentations"
 
-// Base downsample (minimum). 1.0 = full res
 def baseDownsample = 1.0
-
-// Max width/height (in pixels) of exported patches AFTER downsampling
 def maxPatchSidePx = 1024
-
-// If an annotation is still bigger than this after auto-downsampling, skip it
 def hardSkipSidePx = 8000
-
-// Add context padding around each annotation (in FULL-RES pixels)
 def padPx = 0
+
+def wholeClassName = "MG whole"
+def bodyClassName  = "MG cell body"
 // ================================================
 
 
 // Avoid ImageIO disk cache stalls on Windows
 ImageIO.setUseCache(false)
+
+// helper: safe folder token
+def safeToken = { String s ->
+    if (s == null) return "Unclassified"
+    return s.trim()
+            .replaceAll("\\s+", "_")
+            .replaceAll("[^a-zA-Z0-9_-]", "_")
+}
 
 // Base folders
 def imagesRoot = buildFilePath(outDir, "images")
@@ -47,40 +51,44 @@ def imageMaskDir = buildFilePath(masksRoot,  imageName)
 mkdirs(imageImgDir)
 mkdirs(imageMaskDir)
 
-def annotations = hierarchy.getAnnotationObjects()
-def total = annotations.size()
+// Per-class folders
+def imgWholeDir   = buildFilePath(imageImgDir,  safeToken(wholeClassName))
+def maskWholeDir  = buildFilePath(imageMaskDir, safeToken(wholeClassName))
+def maskBodyDir   = buildFilePath(imageMaskDir, safeToken(bodyClassName))
+mkdirs(imgWholeDir)
+mkdirs(maskWholeDir)
+mkdirs(maskBodyDir)
 
 // Full-res dimensions
 int fullW = server.getWidth()
 int fullH = server.getHeight()
 
-println "▶ Found ${total} annotations"
+def annotations = hierarchy.getAnnotationObjects()
+
+def wholeList = annotations.findAll {
+    it.getPathClass()?.toString() == wholeClassName
+}
+
+def bodyList = annotations.findAll {
+    it.getPathClass()?.toString() == bodyClassName
+}
+
+println "▶ Found ${wholeList.size()} ${wholeClassName}"
+println "▶ Found ${bodyList.size()} ${bodyClassName}"
 println "▶ Image size: ${fullW} x ${fullH} (level 0)"
-println "▶ Output image folder: ${imageImgDir}"
 
 
-annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
+// Loop over WHOLE cells
+wholeList.eachWithIndex { PathAnnotationObject whole, int idx ->
 
     try {
-        ROI roi = ann.getROI()
+        ROI wholeROI = whole.getROI()
 
-        double xD = roi.getBoundsX()
-        double yD = roi.getBoundsY()
-        double wD = roi.getBoundsWidth()
-        double hD = roi.getBoundsHeight()
+        int x = (int)Math.floor(wholeROI.getBoundsX()) - padPx
+        int y = (int)Math.floor(wholeROI.getBoundsY()) - padPx
+        int w = (int)Math.ceil(wholeROI.getBoundsWidth()) + 2 * padPx
+        int h = (int)Math.ceil(wholeROI.getBoundsHeight()) + 2 * padPx
 
-        if (wD <= 1 || hD <= 1) {
-            println "[${idx + 1} / ${total}] Skipping tiny annotation ${idx}"
-            return
-        }
-
-        // ---- FULL-RES crop bounds ----
-        int x = (int)Math.floor(xD) - padPx
-        int y = (int)Math.floor(yD) - padPx
-        int w = (int)Math.ceil(wD) + 2 * padPx
-        int h = (int)Math.ceil(hD) + 2 * padPx
-
-        // ---- Clamp to image ----
         if (x < 0) { w += x; x = 0 }
         if (y < 0) { h += y; y = 0 }
         if (x >= fullW || y >= fullH) return
@@ -88,7 +96,6 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
         if (y + h > fullH) h = fullH - y
         if (w <= 1 || h <= 1) return
 
-        // ---- Auto-downsample ----
         double ds = baseDownsample
         double maxSideFull = Math.max(w, h)
         if (maxSideFull / ds > maxPatchSidePx) {
@@ -97,74 +104,62 @@ annotations.eachWithIndex { PathAnnotationObject ann, int idx ->
 
         int outW = (int)Math.round(w / ds)
         int outH = (int)Math.round(h / ds)
+        if (outW > hardSkipSidePx || outH > hardSkipSidePx) return
 
-        if (outW > hardSkipSidePx || outH > hardSkipSidePx) {
-            println "[${idx + 1} / ${total}] Skipping huge annotation ${idx}"
-            return
-        }
+        // New filename (no ann-id mapping logic)
+        def baseStem = "ann-${idx}__x-${x}_y-${y}_w-${w}_h-${h}__ds-${ds as int}"
+        def fileName = baseStem + ".png"
 
-        // ---- Class name ----
-        def pathClass = ann.getPathClass()
-        def className = pathClass == null ? "Unclassified" : pathClass.toString()
-        className = className.replaceAll("[^a-zA-Z0-9_-]", "_")
-
-        // Per-class folders (created on demand)
-        def classImgDir  = buildFilePath(imageImgDir,  className)
-        def classMaskDir = buildFilePath(imageMaskDir, className)
-        mkdirs(classImgDir)
-        mkdirs(classMaskDir)
-
-        // ---- Filename (still includes bbox for traceability) ----
-        def baseName =
-            "ann-${idx}" +
-            "__x-${x}_y-${y}_w-${w}_h-${h}" +
-            "__ds-${ds as int}"
-
-        def request = RegionRequest.createInstance(
-            server.getPath(),
-            ds,
-            x,
-            y,
-            w,
-            h
-        )
+        def request = RegionRequest.createInstance(server.getPath(), ds, x, y, w, h)
 
         // ---------- IMAGE ----------
         BufferedImage img = server.readRegion(request)
-        ImageIO.write(img, "PNG", new File(classImgDir, baseName + ".png"))
+        ImageIO.write(img, "PNG", new File(imgWholeDir, fileName))
 
-        // ---------- MASK ----------
-        BufferedImage mask = new BufferedImage(
-            img.getWidth(),
-            img.getHeight(),
-            BufferedImage.TYPE_BYTE_GRAY
-        )
+        // ---------- WHOLE MASK ----------
+        BufferedImage wholeMask = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_BYTE_GRAY)
+        Graphics2D gWhole = wholeMask.createGraphics()
+        gWhole.setColor(Color.BLACK)
+        gWhole.fillRect(0, 0, wholeMask.getWidth(), wholeMask.getHeight())
+        gWhole.setColor(Color.WHITE)
+        gWhole.translate(-x, -y)
+        if (ds != 1.0) gWhole.scale(1.0 / ds, 1.0 / ds)
+        gWhole.fill(wholeROI.getShape())
+        gWhole.dispose()
+        IJ.save(new ImagePlus("mask", wholeMask), new File(maskWholeDir, fileName).getAbsolutePath())
 
-        Graphics2D g2d = mask.createGraphics()
-        g2d.setColor(Color.BLACK)
-        g2d.fillRect(0, 0, mask.getWidth(), mask.getHeight())
+        // ---------- BODY MASK (union, same filename) ----------
+        def bodiesInside = bodyList.findAll { body ->
+            def bodyROI = body.getROI()
+            wholeROI.getShape().contains(bodyROI.getCentroidX(), bodyROI.getCentroidY())
+        }
 
-        g2d.setColor(Color.WHITE)
-        def shape = roi.getShape()
-        g2d.translate(-x, -y)
-        if (ds != 1.0) g2d.scale(1.0 / ds, 1.0 / ds)
-        g2d.fill(shape)
-        g2d.dispose()
+        BufferedImage bodyMask = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_BYTE_GRAY)
+        Graphics2D gBody = bodyMask.createGraphics()
+        gBody.setColor(Color.BLACK)
+        gBody.fillRect(0, 0, bodyMask.getWidth(), bodyMask.getHeight())
+        gBody.setColor(Color.WHITE)
+        gBody.translate(-x, -y)
+        if (ds != 1.0) gBody.scale(1.0 / ds, 1.0 / ds)
 
-        ImagePlus maskImp = new ImagePlus("mask", mask)
-        IJ.save(maskImp, new File(classMaskDir, baseName + ".png").getAbsolutePath())
-        maskImp.close()
+        bodiesInside.each { body ->
+            gBody.fill(body.getROI().getShape())
+        }
+        gBody.dispose()
+
+        IJ.save(new ImagePlus("mask", bodyMask), new File(maskBodyDir, fileName).getAbsolutePath())
 
         img.flush()
-        mask.flush()
+        wholeMask.flush()
+        bodyMask.flush()
 
         if ((idx + 1) % 25 == 0) System.gc()
 
-        println "[${idx + 1} / ${total}] Exported ${imageName}/${className}/${baseName}"
+        println "Exported ${baseStem} (bodies inside: ${bodiesInside.size()})"
 
     } catch (Exception e) {
-        println "[${idx + 1} / ${total}] ERROR on annotation ${idx}: ${e.getMessage()}"
+        println "ERROR on ann-${idx}: ${e.getMessage()}"
     }
 }
 
-println "✅ Done exporting ${total} annotations"
+println "✅ Done"

@@ -20,6 +20,21 @@
             ],
 
             "justMyCode": false
+        },
+        {
+            "name": "Debug segmentation_training.py",
+            "type": "debugpy",
+            "request": "launch",
+
+            "program": "${workspaceFolder}/initial_pipeline/segmentation/custom_segmentation/segmentation_training.py",
+
+            "cwd": "${workspaceFolder}/initial_pipeline/segmentation/custom_segmentation",
+
+            "console": "integratedTerminal",
+
+            // "python": "${workspaceFolder}/segmentation_venv/Scripts/python.exe",
+
+            "justMyCode": false
         }
     ]
 }

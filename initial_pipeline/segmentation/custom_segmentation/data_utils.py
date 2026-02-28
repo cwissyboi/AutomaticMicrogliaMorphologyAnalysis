@@ -109,3 +109,83 @@ def export_calculated_masks(
         out_path = out_dir / out_name
 
         Image.fromarray(mask).save(out_path)
+
+
+def pair_whole_and_soma_masks(root_dir, mask_name='masks'):
+    """
+    Create a DataFrame that pairs MG_whole masks with their corresponding MG_cell_body masks.
+    
+    This function indexes segmentation data where both MG_whole (entire cell) and 
+    MG_cell_body (soma) masks exist for the same cell instance. It matches them by 
+    image filename (which contains cell coordinates).
+    
+    Parameters
+    ----------
+    root_dir : str or Path
+        Root directory containing 'images' and 'masks' folders
+    mask_name : str
+        Name of the mask folder (default: 'masks')
+        
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns:
+        - scan: scan name
+        - image_path: path to the image (from MG_whole)
+        - whole_mask_path: path to MG_whole mask
+        - soma_mask_path: path to MG_cell_body mask (None if not available)
+        
+    Notes
+    -----
+    - Only includes rows where MG_whole exists
+    - soma_mask_path may be None if no corresponding MG_cell_body mask exists
+    - Assumes image filenames uniquely identify cell instances
+    """
+    root_dir = Path(root_dir)
+    images_root = root_dir / "images"
+    masks_root = root_dir / mask_name
+    
+    records = []
+    
+    for scan_dir in images_root.iterdir():
+        if not scan_dir.is_dir():
+            continue
+            
+        scan_name = scan_dir.name
+        
+        # Look for MG_whole images
+        whole_dir = scan_dir / "MG_whole"
+        if not whole_dir.exists() or not whole_dir.is_dir():
+            continue
+            
+        for img_path in whole_dir.iterdir():
+            if img_path.suffix.lower() not in [".png", ".jpg", ".tif", ".tiff"]:
+                continue
+                
+            # Get MG_whole mask path
+            whole_mask_path = masks_root / scan_name / "MG_whole" / img_path.name
+            if not whole_mask_path.exists():
+                continue  # Skip if MG_whole mask doesn't exist
+                
+            # Try to find corresponding MG_cell_body mask
+            soma_mask_path = masks_root / scan_name / "MG_cell_body" / img_path.name
+            if not soma_mask_path.exists():
+                soma_mask_path = None  # No soma mask available for this cell
+                
+            records.append({
+                "scan": scan_name,
+                "image_path": img_path,
+                "whole_mask_path": whole_mask_path,
+                "soma_mask_path": soma_mask_path,
+            })
+    
+    df = pd.DataFrame(records)
+    
+    # Sort for reproducibility
+    df = df.sort_values(
+        by=["scan", "image_path"],
+        ignore_index=True
+    )
+    
+    return df
+
