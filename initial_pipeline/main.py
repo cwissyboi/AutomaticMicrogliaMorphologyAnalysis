@@ -25,7 +25,7 @@ def main():
     output_name = args["output_name"]
 
     print("custom yolo")
-    yolo = YOLO(r"object_detection/custom_detection/yolo_good_runs/yolo_human_adjusted.pt")
+    yolo = YOLO(r"object_detection/custom_detection/yolo_good_runs/28_2_rat_pretraining.pt")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

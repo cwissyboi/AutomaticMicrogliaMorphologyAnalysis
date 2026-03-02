@@ -33,7 +33,7 @@ from training.evaluation import (
     iou_score,
     morphology_similarity_score
 )
-from crf import connect_components_adaptive
+from crf import connect_components_adaptive, connect_components_probability_based
 from training.printing_utils import print_all_cross_validation_results
 
 # Setup imports from initial_pipeline (for morphology features)
@@ -159,7 +159,7 @@ def train_epoch(model, loader, device, optimizer, criterion):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, calculate_morphology_metric=False, apply_postprocessing=False):
+def evaluate(model, loader, device, calculate_morphology_metric=False, apply_postprocessing=False, postprocessing_type='adaptive'):
     """
     Evaluate model on a dataset.
     
@@ -169,9 +169,14 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
         device: Device to run evaluation on
         calculate_morphology_metric: If True, compute morphology similarity score.
                                      Default False since it's computationally expensive.
-        apply_postprocessing: If True, apply connect_components_adaptive to predictions
+        apply_postprocessing: If True, apply postprocessing to predictions
                              before computing metrics (mimics inference pipeline).
                              Default False.
+        postprocessing_type: Type of postprocessing to apply ('adaptive' or 'probability').
+                            Only used if apply_postprocessing=True.
+                            - 'adaptive': Uses connect_components_adaptive (color/texture based)
+                            - 'probability': Uses connect_components_probability_based (UNet confidence based)
+                            Default 'adaptive'.
     
     Returns:
         Dictionary with dice, iou, and optionally morphology scores
@@ -195,15 +200,27 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
             # Apply postprocessing if requested
             if apply_postprocessing:
                 # Convert to numpy
-                pred_np = (pred > 0.5).cpu().numpy().astype(np.uint8)
                 img_np = (x[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
                 
-                # Apply postprocessing (connect components)
-                connected_mask = connect_components_adaptive(
-                    pred_np, 
-                    img_np, 
-                    min_component_frac=0.0
-                )
+                if postprocessing_type == 'adaptive':
+                    # Traditional: color/texture based
+                    pred_np = (pred > 0.5).cpu().numpy().astype(np.uint8)
+                    connected_mask = connect_components_adaptive(
+                        pred_np, 
+                        img_np, 
+                        min_component_frac=0.0
+                    )
+                elif postprocessing_type == 'probability':
+                    # Probability-based: uses UNet confidence
+                    prob_map = pred.cpu().numpy().astype(np.float32)
+                    connected_mask = connect_components_probability_based(
+                        prob_map=prob_map,
+                        image=img_np,
+                        threshold=0.5,
+                        min_component_frac=0.0,
+                    )
+                else:
+                    raise ValueError(f"Unknown postprocessing_type: {postprocessing_type}. Must be 'adaptive' or 'probability'")
                 
                 # Convert back to tensor
                 pred = torch.from_numpy(connected_mask).float().to(device)
@@ -229,7 +246,7 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
 
 
 @torch.no_grad()
-def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_size=256, threshold=0.5, apply_postprocessing=False):
+def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_size=256, threshold=0.5, apply_postprocessing=False, postprocessing_type='adaptive'):
     """
     Evaluate model on test set with region-based metrics (soma vs branches).
     
@@ -243,9 +260,14 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
         training_data_dir: The directory used for training (to auto-detect WithSoma usage)
         img_size: Image size for model input (default: 256)
         threshold: Threshold for binarizing predictions (default: 0.5)
-        apply_postprocessing: If True, apply connect_components_adaptive to predictions
+        apply_postprocessing: If True, apply postprocessing to predictions
                              before computing metrics (mimics inference pipeline).
                              Default False.
+        postprocessing_type: Type of postprocessing to apply ('adaptive' or 'probability').
+                            Only used if apply_postprocessing=True.
+                            - 'adaptive': Uses connect_components_adaptive (color/texture based)
+                            - 'probability': Uses connect_components_probability_based (UNet confidence based)
+                            Default 'adaptive'.
         
     Returns:
         Dictionary with aggregated metrics from aggregate_metrics()
@@ -269,7 +291,7 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
         return None
     
     soma_count = test_paired_df['soma_mask_path'].notna().sum()
-    postprocessing_label = " (WITH POSTPROCESSING)" if apply_postprocessing else ""
+    postprocessing_label = f" (WITH POSTPROCESSING: {postprocessing_type})" if apply_postprocessing else ""
     print(f"\nREGION-BASED EVALUATION ON TEST SET{postprocessing_label}")
     print(f"Test samples: {len(test_paired_df)} (expected: {len(test_df)})")
     print(f"Samples with soma masks: {soma_count}/{len(test_paired_df)}")
@@ -296,14 +318,27 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
         
         # Apply postprocessing if requested
         if apply_postprocessing:
-            pred_np = (pred > threshold).cpu().numpy().astype(np.uint8)
             img_np = (img_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             
-            connected_mask = connect_components_adaptive(
-                pred_np,
-                img_np,
-                min_component_frac=0.0
-            )
+            if postprocessing_type == 'adaptive':
+                # Traditional: color/texture based
+                pred_np = (pred > threshold).cpu().numpy().astype(np.uint8)
+                connected_mask = connect_components_adaptive(
+                    pred_np,
+                    img_np,
+                    min_component_frac=0.0
+                )
+            elif postprocessing_type == 'probability':
+                # Probability-based: uses UNet confidence
+                prob_map = pred.cpu().numpy().astype(np.float32)
+                connected_mask = connect_components_probability_based(
+                    prob_map=prob_map,
+                    image=img_np,
+                    threshold=threshold,
+                    min_component_frac=0.0,
+                )
+            else:
+                raise ValueError(f"Unknown postprocessing_type: {postprocessing_type}. Must be 'adaptive' or 'probability'")
             
             # Convert back to tensor
             pred = torch.from_numpy(connected_mask).float()
@@ -381,7 +416,7 @@ def main():
 
     # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
-    path_df = path_df.head(20)
+    # path_df = path_df.head(40)
     print(len(path_df), "annotation pairs found")
 
     k_folds = 5
@@ -394,6 +429,8 @@ def main():
     all_fold_region_metrics = []
     all_fold_postprocessed_metrics = []
     all_fold_postprocessed_region_metrics = []
+    all_fold_postprocessed_probability_metrics = []
+    all_fold_postprocessed_probability_region_metrics = []
 
     train_tfms = A.Compose([
         A.Resize(256, 256),
@@ -447,7 +484,7 @@ def main():
             add_new_components=False
         )
 
-        batch_size = 1
+        batch_size = 16
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
         test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
@@ -464,7 +501,7 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 1
+        max_epochs = 100
         patience = 10
 
         best_dice = -float("inf")
@@ -558,10 +595,10 @@ def main():
             print("!!! Continuing to next fold...\n")
         
         # ========================================================================
-        # POSTPROCESSED EVALUATION
+        # POSTPROCESSED EVALUATION (ADAPTIVE - Color/Texture Based)
         # ========================================================================
         print("\n" + "="*70)
-        print("EVALUATING WITH POSTPROCESSING (connect_all_masks)")
+        print("EVALUATING WITH POSTPROCESSING: ADAPTIVE (Color/Texture Based)")
         print("="*70)
         
         # Standard metrics with postprocessing
@@ -569,12 +606,13 @@ def main():
             postprocessed_metrics = evaluate(
                 model, test_loader, device, 
                 calculate_morphology_metric=True,
-                apply_postprocessing=True
+                apply_postprocessing=True,
+                postprocessing_type='adaptive'
             )
             all_fold_postprocessed_metrics.append(postprocessed_metrics)
             
             print(
-                f"Fold {fold + 1} postprocessed test | "
+                f"Fold {fold + 1} postprocessed (adaptive) test | "
                 f"Dice: {postprocessed_metrics['dice']:.4f}, "
                 f"IoU: {postprocessed_metrics['iou']:.4f}, "
                 f"Morphology: {postprocessed_metrics['morphology']:.4f}"
@@ -595,7 +633,8 @@ def main():
                 training_data_dir=SEGMENTATIONS_DIR,
                 img_size=256,
                 threshold=0.5,
-                apply_postprocessing=True
+                apply_postprocessing=True,
+                postprocessing_type='adaptive'
             )
             
             if postprocessed_region_results is not None:
@@ -610,6 +649,61 @@ def main():
             traceback.print_exc()
             print("!!! Continuing to next fold...\n")
         
+        # ========================================================================
+        # POSTPROCESSED EVALUATION (PROBABILITY - UNet Confidence Based)
+        # ========================================================================
+        print("\n" + "="*70)
+        print("EVALUATING WITH POSTPROCESSING: PROBABILITY (UNet Confidence Based)")
+        print("="*70)
+        
+        # Standard metrics with probability-based postprocessing
+        try:
+            postprocessed_prob_metrics = evaluate(
+                model, test_loader, device, 
+                calculate_morphology_metric=True,
+                apply_postprocessing=True,
+                postprocessing_type='probability'
+            )
+            all_fold_postprocessed_probability_metrics.append(postprocessed_prob_metrics)
+            
+            print(
+                f"Fold {fold + 1} postprocessed (probability) test | "
+                f"Dice: {postprocessed_prob_metrics['dice']:.4f}, "
+                f"IoU: {postprocessed_prob_metrics['iou']:.4f}, "
+                f"Morphology: {postprocessed_prob_metrics['morphology']:.4f}"
+            )
+        except Exception as e:
+            print(f"\n!!! ERROR in probability-based postprocessed evaluation: {e}")
+            print(f"!!! Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("!!! Continuing to next fold...\n")
+        
+        # Region-based evaluation with probability-based postprocessing
+        try:
+            postprocessed_prob_region_results = evaluate_test_with_regions(
+                model=model,
+                test_df=test_df,
+                device=device,
+                training_data_dir=SEGMENTATIONS_DIR,
+                img_size=256,
+                threshold=0.5,
+                apply_postprocessing=True,
+                postprocessing_type='probability'
+            )
+            
+            if postprocessed_prob_region_results is not None:
+                print_metrics_summary(postprocessed_prob_region_results)
+                all_fold_postprocessed_probability_region_metrics.append(postprocessed_prob_region_results)
+            else:
+                print("\nProbability-based postprocessed region-based evaluation returned None (no soma masks found)")
+        except Exception as e:
+            print(f"\n!!! ERROR in probability-based postprocessed region-based evaluation: {e}")
+            print(f"!!! Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            print("!!! Continuing to next fold...\n")
+        
         print("="*70 + "\n")
 
 
@@ -618,7 +712,9 @@ def main():
         all_fold_metrics=all_fold_metrics,
         all_fold_region_metrics=all_fold_region_metrics,
         all_fold_postprocessed_metrics=all_fold_postprocessed_metrics,
-        all_fold_postprocessed_region_metrics=all_fold_postprocessed_region_metrics
+        all_fold_postprocessed_region_metrics=all_fold_postprocessed_region_metrics,
+        all_fold_postprocessed_probability_metrics=all_fold_postprocessed_probability_metrics,
+        all_fold_postprocessed_probability_region_metrics=all_fold_postprocessed_probability_region_metrics
     )
 
 

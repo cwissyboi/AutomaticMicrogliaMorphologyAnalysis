@@ -46,7 +46,7 @@ scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 Copy a folder from DAIC to computer 
 scp -r [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefolder ./
 
-scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/yolo_runs/yolo_output_2026-02-15_16-51-50/weights ./
+scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/cv_runs/cv_20260228_173932/fold_1_20260228_173932/weights ./
 
 Home directory /home/nfs/ccharlesworth
 

@@ -405,6 +405,180 @@ def connect_components_adaptive(
 
 
 
+def connect_components_probability_based(
+    prob_map,
+    image,
+    threshold=0.5,
+    min_component_frac=0.0005,
+    max_connection_distance=60,
+    prob_cost_weight=5.0,
+):
+    """
+    Connect disconnected components based on UNet probability predictions.
+    
+    Unlike connect_components_adaptive which uses image color/texture,
+    this function uses the probability map from the neural network to
+    guide connections through high-confidence regions.
+    
+    Parameters
+    ----------
+    prob_map : np.ndarray, shape (H, W), float32 in [0, 1]
+        Probability map from UNet (after sigmoid, before thresholding)
+    image : np.ndarray, shape (H, W, 3), uint8
+        Original RGB/BGR image (used for visualization context only)
+    threshold : float, default 0.5
+        Probability threshold to create initial binary mask
+    min_component_frac : float, default 0.0005
+        Minimum component size as fraction of image area
+    max_connection_distance : int, default 60
+        Maximum pixel distance to connect components
+    prob_cost_weight : float, default 5.0
+        Weight for probability cost. Higher = paths prefer high-probability regions more strongly.
+        Cost = prob_cost_weight * (1 - probability)
+    
+    Returns
+    -------
+    np.ndarray, shape (H, W), uint8
+        Connected binary mask
+        
+    Algorithm
+    ---------
+    1. Create initial binary mask by thresholding prob_map at threshold
+    2. Find all connected components above min_component_frac
+    3. Iteratively connect closest component pairs using geodesic paths
+       - Cost map derived from probability: low prob = high cost
+       - Path finding uses route_through_array with fully_connected=True
+       - Connection thickness adapts to component thickness
+    4. Stop when max_connection_distance exceeded or all connected
+    """
+    
+    if prob_map.dtype != np.float32:
+        prob_map = prob_map.astype(np.float32)
+    
+    # Ensure probabilities are in [0, 1]
+    prob_map = np.clip(prob_map, 0.0, 1.0)
+    
+    H, W = prob_map.shape
+    image_area = H * W
+    min_area_px = min_component_frac * image_area
+    
+    # Create initial binary mask from probability threshold
+    binary_mask = (prob_map >= threshold).astype(np.uint8)
+    
+    # Label components
+    num_labels, labels = cv2.connectedComponents(binary_mask)
+    if num_labels <= 2:
+        return binary_mask
+    
+    # Extract valid components (above minimum size)
+    components = {}
+    for label in range(1, num_labels):
+        ys, xs = np.where(labels == label)
+        if len(xs) >= min_area_px:
+            components[label] = np.column_stack([ys, xs])
+    
+    if len(components) <= 1:
+        return binary_mask
+    
+    # --- Build cost map from probability ---
+    # High probability (confident foreground) = LOW cost
+    # Low probability (uncertain/background) = HIGH cost
+    prob_cost = prob_cost_weight * (1.0 - prob_map)
+    
+    # Add small epsilon to avoid zero costs
+    cost = prob_cost + 1e-3
+    
+    current_mask = binary_mask.copy()
+    
+    # --- Iterative connection of closest components ---
+    while True:
+        # Re-label components in current mask
+        num_labels, labels = cv2.connectedComponents(current_mask)
+        if num_labels <= 2:
+            break
+        
+        # Extract current components
+        components = {}
+        for label in range(1, num_labels):
+            ys, xs = np.where(labels == label)
+            components[label] = np.column_stack([ys, xs])
+        
+        label_ids = list(components.keys())
+        best_pair = None
+        best_distance = np.inf
+        
+        # Find closest pair of components (Euclidean distance)
+        for i in range(len(label_ids)):
+            for j in range(i + 1, len(label_ids)):
+                comp1 = components[label_ids[i]]
+                comp2 = components[label_ids[j]]
+                
+                # Compute pairwise distances between all pixels
+                dists = np.linalg.norm(
+                    comp1[:, None, :] - comp2[None, :, :],
+                    axis=2
+                )
+                
+                min_dist = dists.min()
+                
+                if min_dist < best_distance:
+                    best_distance = min_dist
+                    idx = np.unravel_index(np.argmin(dists), dists.shape)
+                    best_pair = (
+                        label_ids[i],
+                        label_ids[j],
+                        tuple(comp1[idx[0]]),  # (y, x)
+                        tuple(comp2[idx[1]])   # (y, x)
+                    )
+        
+        # Stop if components are too far apart
+        if best_distance > max_connection_distance:
+            break
+        
+        label1, label2, p1, p2 = best_pair
+        
+        # --- Find geodesic path through probability cost map ---
+        path, _ = route_through_array(
+            cost,
+            p1,
+            p2,
+            fully_connected=True
+        )
+        
+        # --- Estimate connection thickness from component thickness ---
+        comp_mask1 = (labels == label1).astype(np.uint8)
+        comp_mask2 = (labels == label2).astype(np.uint8)
+        
+        dt1 = distance_transform_edt(comp_mask1)
+        dt2 = distance_transform_edt(comp_mask2)
+        
+        # Use median thickness (robust to outliers)
+        t1 = 2 * np.median(dt1[dt1 > 0]) if np.any(dt1 > 0) else 1
+        t2 = 2 * np.median(dt2[dt2 > 0]) if np.any(dt2 > 0) else 1
+        
+        # Average thickness, scale down for connection
+        radius = int(max(1, 0.25 * (t1 + t2)))
+        
+        # --- Draw connection path ---
+        path_mask = np.zeros_like(current_mask, dtype=np.uint8)
+        for (r, c) in path:
+            path_mask[r, c] = 1
+        
+        # Dilate path to desired thickness
+        kernel_size = int(2 * radius + 1)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_size, kernel_size)
+        )
+        
+        thick_path = cv2.dilate(path_mask, kernel)
+        
+        # Merge connection into mask
+        current_mask = np.maximum(current_mask, thick_path)
+    
+    return current_mask.astype(np.uint8)
+
+
 def connect_all_masks(masks, image, image_path, scan_folder,  output_to_file = True,   
         output_name = 'temp', 
         output_folder = 'segmentation/segmentation_output/custom_segmentation/postprocessing'):
@@ -435,6 +609,7 @@ def connect_all_masks(masks, image, image_path, scan_folder,  output_to_file = T
         )
 
     return connected_masks
+
 
 def remove_blue_pixels(mask, image, hue_range=(90, 140), min_saturation=0.1):
     """

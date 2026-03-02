@@ -11,7 +11,8 @@ from typing import List, Dict, Optional
 
 def print_standard_metrics(
     all_fold_metrics: List[Dict],
-    with_postprocessing: bool = False
+    with_postprocessing: bool = False,
+    label: Optional[str] = None
 ):
     """
     Print standard metrics (Dice, IoU, Morphology) across all folds.
@@ -19,14 +20,20 @@ def print_standard_metrics(
     Args:
         all_fold_metrics: List of dictionaries containing metrics from each fold
         with_postprocessing: Whether these results are from postprocessed predictions
+        label: Optional custom label (e.g., "ADAPTIVE", "PROBABILITY"). If not provided,
+               uses "WITH POSTPROCESSING" or "NO POSTPROCESSING" based on with_postprocessing flag.
     """
     dice_scores = [m["dice"] for m in all_fold_metrics]
     iou_scores = [m["iou"] for m in all_fold_metrics]
     morphology_scores = [m["morphology"] for m in all_fold_metrics]
     
-    label = "WITH POSTPROCESSING" if with_postprocessing else "NO POSTPROCESSING"
+    if label:
+        display_label = label
+    else:
+        display_label = "WITH POSTPROCESSING" if with_postprocessing else "NO POSTPROCESSING"
+    
     print("\n" + "="*70)
-    print(f"CROSS-VALIDATION RESULTS (Standard Metrics - {label})")
+    print(f"CROSS-VALIDATION RESULTS (Standard Metrics - {display_label})")
     print("="*70)
     print(f"Dice:       {np.mean(dice_scores):.4f} ± {np.std(dice_scores):.4f}")
     print(f"IoU:        {np.mean(iou_scores):.4f} ± {np.std(iou_scores):.4f}")
@@ -276,7 +283,9 @@ def print_all_cross_validation_results(
     all_fold_metrics: List[Dict],
     all_fold_region_metrics: List[Dict],
     all_fold_postprocessed_metrics: Optional[List[Dict]] = None,
-    all_fold_postprocessed_region_metrics: Optional[List[Dict]] = None
+    all_fold_postprocessed_region_metrics: Optional[List[Dict]] = None,
+    all_fold_postprocessed_probability_metrics: Optional[List[Dict]] = None,
+    all_fold_postprocessed_probability_region_metrics: Optional[List[Dict]] = None
 ):
     """
     Print all cross-validation results in a comprehensive format.
@@ -284,27 +293,48 @@ def print_all_cross_validation_results(
     This is the main function that prints:
     1. Standard metrics without postprocessing
     2. Region-based metrics without postprocessing
-    3. Standard metrics with postprocessing (if available)
-    4. Region-based metrics with postprocessing (if available)
-    5. Comparisons between postprocessed and non-postprocessed results
+    3. Standard metrics with postprocessing - ADAPTIVE (color/texture based)
+    4. Region-based metrics with postprocessing - ADAPTIVE
+    5. Standard metrics with postprocessing - PROBABILITY (UNet confidence based)
+    6. Region-based metrics with postprocessing - PROBABILITY
+    7. Comparisons between different postprocessing methods
     
     Args:
         all_fold_metrics: Standard metrics from all folds (no postprocessing)
         all_fold_region_metrics: Region-based metrics from all folds (no postprocessing)
-        all_fold_postprocessed_metrics: Standard metrics with postprocessing (optional)
-        all_fold_postprocessed_region_metrics: Region-based metrics with postprocessing (optional)
+        all_fold_postprocessed_metrics: Standard metrics with adaptive postprocessing (optional)
+        all_fold_postprocessed_region_metrics: Region-based metrics with adaptive postprocessing (optional)
+        all_fold_postprocessed_probability_metrics: Standard metrics with probability postprocessing (optional)
+        all_fold_postprocessed_probability_region_metrics: Region-based metrics with probability postprocessing (optional)
     """
     # Print baseline results
     print_standard_metrics(all_fold_metrics, with_postprocessing=False)
     print_region_based_metrics(all_fold_region_metrics, with_postprocessing=False)
     
-    # Print postprocessed results if available
+    # Print adaptive postprocessed results if available
     if all_fold_postprocessed_metrics:
-        print_standard_metrics(all_fold_postprocessed_metrics, with_postprocessing=True)
+        print("\n" + "="*70)
+        print("POSTPROCESSING: ADAPTIVE (Color/Texture Based)")
+        print("="*70)
+        print_standard_metrics(all_fold_postprocessed_metrics, with_postprocessing=True, label="ADAPTIVE")
         print_standard_metrics_comparison(all_fold_metrics, all_fold_postprocessed_metrics)
     
     if all_fold_postprocessed_region_metrics:
         print_region_based_metrics_with_comparison(
             all_fold_region_metrics,
             all_fold_postprocessed_region_metrics
+        )
+    
+    # Print probability-based postprocessed results if available
+    if all_fold_postprocessed_probability_metrics:
+        print("\n" + "="*70)
+        print("POSTPROCESSING: PROBABILITY (UNet Confidence Based)")
+        print("="*70)
+        print_standard_metrics(all_fold_postprocessed_probability_metrics, with_postprocessing=True, label="PROBABILITY")
+        print_standard_metrics_comparison(all_fold_metrics, all_fold_postprocessed_probability_metrics)
+    
+    if all_fold_postprocessed_probability_region_metrics:
+        print_region_based_metrics_with_comparison(
+            all_fold_region_metrics,
+            all_fold_postprocessed_probability_region_metrics
         )

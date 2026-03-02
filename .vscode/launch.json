@@ -22,6 +22,26 @@
             "justMyCode": false
         },
         {
+            "name": "Debug yolo_inference_only.py",
+            "type": "debugpy",
+            "request": "launch",
+
+            "program": "${workspaceFolder}/initial_pipeline/object_detection/custom_detection/yolo_inference_only.py",
+
+            "cwd": "${workspaceFolder}/initial_pipeline/object_detection/custom_detection",
+
+            "console": "integratedTerminal",
+
+            "args": [
+                "--input_folder_path",
+                "../../../All_scans_tiled_subset_GM",
+                "--output_name",
+                "yolo_for_semi_supervised"
+            ],
+
+            "justMyCode": false
+        },
+        {
             "name": "Debug segmentation_training.py",
             "type": "debugpy",
             "request": "launch",
