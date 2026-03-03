@@ -55,6 +55,35 @@
             // "python": "${workspaceFolder}/segmentation_venv/Scripts/python.exe",
 
             "justMyCode": false
+        },
+        {
+            "name": "Debug mean_teacher_training.py",
+            "type": "debugpy",
+            "request": "launch",
+
+            "program": "${workspaceFolder}/initial_pipeline/segmentation/custom_segmentation/mean_teacher_training.py",
+
+            "cwd": "${workspaceFolder}/initial_pipeline/segmentation/custom_segmentation",
+
+            "console": "integratedTerminal",
+
+            // "python": "${workspaceFolder}/segmentation_venv/Scripts/python.exe",
+
+            "args": [
+                "--unlabelled_dir",
+                "../../object_detection/custom_detection/object_detection_output/yolo_for_semi_supervised",
+                "--loss_type", "bce_cldice_betti",
+                "--cldice_alpha", "0.4",
+                "--betti_beta", "0.2",
+                "--ema_alpha", "0.999",
+                "--consistency_weight", "1.0",
+                "--consistency_rampup", "20",
+                "--unlabelled_batch_size", "16",
+                "--epochs", "100",
+                "--patience", "10"
+            ],
+
+            "justMyCode": false
         }
     ]
 }

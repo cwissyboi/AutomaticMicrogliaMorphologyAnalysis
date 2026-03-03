@@ -1,7 +1,11 @@
 from torch.utils.data import Dataset
+from pathlib import Path
 from PIL import Image
 import numpy as np
 import cv2
+import torch
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 from random_disconnections.disconnect_components import disconnect_branches_with_gap
 from random_disconnections.find_connection_points import find_random_branch_points
 from random_disconnections.random_colour_noise import add_floating_synthetic_fragments
@@ -73,3 +77,77 @@ class SegmentationDataset(Dataset):
         mask = mask.unsqueeze(0)  # (1, H, W)
 
         return image, mask
+
+
+class UnlabelledCellDataset(Dataset):
+    """
+    Dataset for unlabelled cell crops used in Mean Teacher semi-supervised training.
+
+    Scans a root directory that contains one subfolder per scan, where each
+    subfolder holds individual JPEG/PNG cell crops produced by YOLO detection.
+
+    Both the student and teacher receive the SAME randomly-augmented view of
+    each image (same flip/rotation applied via a shared ReplayCompose).  The
+    replay data is returned alongside the tensors so the training loop can
+    invert the spatial transform on the teacher's output prediction before
+    computing the pixel-wise MSE consistency loss.
+
+    This ensures the consistency loss compares spatially-aligned predictions:
+      - Student pred (in augmented space)
+      - Teacher pred inverse-transformed back to augmented space  ← aligned
+
+    Args:
+        root_dir:   Path to the directory that contains one subfolder per scan.
+        transform:  albumentations.ReplayCompose transform. Must use ReplayCompose
+                    (not plain Compose) so replay data can be captured.
+                    If None, only resize to 256x256 is applied.
+    """
+
+    _EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+    def __init__(self, root_dir, transform=None):
+        self.transform = transform
+
+        root = Path(root_dir)
+        self.image_paths = sorted([
+            p for p in root.rglob("*")
+            if p.is_file() and p.suffix.lower() in self._EXTENSIONS
+        ])
+
+        if len(self.image_paths) == 0:
+            raise ValueError(
+                f"No images found under {root_dir}. "
+                f"Expected sub-folders with {self._EXTENSIONS} files."
+            )
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        image = np.array(Image.open(img_path).convert("RGB"))
+
+        _fallback_tfm = A.ReplayCompose([A.Resize(256, 256), ToTensorV2()])
+
+        if self.transform:
+            student_result = self.transform(image=image)
+            student_view   = student_result["image"].float() / 255.0
+            student_replay = student_result["replay"]
+
+            teacher_result = self.transform(image=image)
+            teacher_view   = teacher_result["image"].float() / 255.0
+            teacher_replay = teacher_result["replay"]
+        else:
+            student_result = _fallback_tfm(image=image)
+            student_view   = student_result["image"].float() / 255.0
+            student_replay = None
+
+            teacher_result = _fallback_tfm(image=image)
+            teacher_view   = teacher_result["image"].float() / 255.0
+            teacher_replay = None
+
+        # Original: resize only, no augmentation — used by the debug visualiser.
+        original = A.Compose([A.Resize(256, 256), ToTensorV2()])(image=image)["image"]
+        original = original.float() / 255.0
+
+        return original, student_view, student_replay, teacher_view, teacher_replay

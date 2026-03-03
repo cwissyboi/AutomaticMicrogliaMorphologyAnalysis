@@ -71,3 +71,29 @@ def soft_cldice_loss(pred, target, target_skeleton=None):
     intersection = iflat * tflat
     return -((2. * intersection) /
               (iflat + tflat))
+
+
+def consistency_loss(student_logits, teacher_logits):
+    """
+    Mean-squared error between student and teacher soft predictions.
+
+    Both inputs are raw logits (before sigmoid).  We apply sigmoid to convert
+    them to probabilities before computing MSE so the loss is bounded in [0, 1]
+    and not sensitive to the logit scale.
+
+    This is the unsupervised term in the Mean Teacher objective:
+        L_consistency = MSE( σ(student_logits), σ(teacher_logits) )
+
+    The teacher logits should be computed under torch.no_grad() to prevent
+    gradients from flowing through the teacher network.
+
+    Args:
+        student_logits: Raw logits from the student model, shape (B, 1, H, W).
+        teacher_logits: Raw logits from the teacher model, shape (B, 1, H, W).
+
+    Returns:
+        Scalar MSE loss.
+    """
+    student_probs = torch.sigmoid(student_logits)
+    teacher_probs = torch.sigmoid(teacher_logits)
+    return torch.nn.functional.mse_loss(student_probs, teacher_probs)

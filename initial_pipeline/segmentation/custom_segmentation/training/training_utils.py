@@ -2,6 +2,7 @@ import random
 import argparse
 import numpy as np
 import torch
+import copy
 import os
 from datetime import datetime
 
@@ -84,4 +85,125 @@ def parse_segmentation_args():
                         help="Weight for hole count (β1) in Betti loss. "
                              "Higher values penalize wrong number of holes more")
     
+    return parser.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Mean Teacher utilities
+# ---------------------------------------------------------------------------
+
+def create_ema_model(student_model):
+    """
+    Create a teacher model as a deep copy of the student.
+
+    The teacher's parameters are updated only via EMA, never via gradients,
+    so we detach everything and freeze requires_grad.
+
+    Args:
+        student_model: Initialised student UNet (on any device).
+
+    Returns:
+        teacher_model: Identical architecture, same initial weights, no grads.
+    """
+    teacher_model = copy.deepcopy(student_model)
+    for param in teacher_model.parameters():
+        param.requires_grad_(False)
+    return teacher_model
+
+
+@torch.no_grad()
+def update_ema_weights(teacher_model, student_model, alpha):
+    """
+    Update teacher model weights using exponential moving average.
+
+    θ_teacher  ←  alpha * θ_teacher  +  (1 - alpha) * θ_student
+
+    A higher alpha means the teacher changes more slowly (more momentum).
+    Typical range: 0.99 – 0.999.
+
+    Args:
+        teacher_model: EMA model whose parameters are updated in-place.
+        student_model: Student model after the latest gradient step.
+        alpha:         EMA decay coefficient.
+    """
+    for t_param, s_param in zip(teacher_model.parameters(), student_model.parameters()):
+        t_param.data.mul_(alpha).add_(s_param.data, alpha=1.0 - alpha)
+
+
+def get_consistency_weight(epoch, rampup_epochs):
+    """
+    Sigmoid ramp-up schedule for the unsupervised consistency loss weight.
+
+    Returns a value in [0, 1]:
+      - 0.0 at epoch 0  (pure supervised training at the start)
+      - ~1.0 after rampup_epochs
+
+    This prevents the consistency loss from dominating before the student has
+    learned meaningful representations.
+
+    Args:
+        epoch:          Current training epoch (0-indexed).
+        rampup_epochs:  Number of epochs over which to ramp up.
+
+    Returns:
+        float in [0, 1]
+    """
+    if rampup_epochs == 0:
+        return 1.0
+    rampup_ratio = min(epoch / rampup_epochs, 1.0)
+    # Gaussian ramp-up as used in the original Mean Teacher paper
+    return float(np.exp(-5.0 * (1.0 - rampup_ratio) ** 2))
+
+
+def parse_mean_teacher_args():
+    """
+    Argument parser for Mean Teacher semi-supervised training.
+
+    Extends the base segmentation args with Mean Teacher-specific options.
+    """
+    parser = argparse.ArgumentParser(
+        description="Mean Teacher semi-supervised UNet segmentation training"
+    )
+
+    # ---- inherited supervised args ----------------------------------------
+    parser.add_argument("--epochs", type=int, default=100,
+                        help="Max training epochs")
+    parser.add_argument("--patience", type=int, default=10,
+                        help="Early stopping patience")
+    parser.add_argument("--disconnect_components", type=bool, default=False,
+                        help="Apply random disconnections augmentation to labelled data")
+    parser.add_argument("--add_new_components", type=bool, default=False,
+                        help="Add synthetic fragment augmentation to labelled data")
+    parser.add_argument("--loss_type", type=str, default="bce",
+                        choices=["bce", "dice", "cldice", "betti",
+                                 "bce_cldice", "dice_cldice",
+                                 "bce_cldice_betti", "dice_cldice_betti"],
+                        help="Supervised loss function type")
+    parser.add_argument("--cldice_alpha", type=float, default=0.5,
+                        help="clDice weight in combined supervised losses")
+    parser.add_argument("--betti_beta", type=float, default=0.3,
+                        help="Betti loss weight in triple supervised losses")
+    parser.add_argument("--betti_b0_weight", type=float, default=1.0,
+                        help="β0 (component count) weight inside Betti loss")
+    parser.add_argument("--betti_b1_weight", type=float, default=0.5,
+                        help="β1 (hole count) weight inside Betti loss")
+
+    # ---- Mean Teacher-specific args ---------------------------------------
+    parser.add_argument("--unlabelled_dir", type=str,
+                        default=None,
+                        help="Root directory of unlabelled cell crops "
+                             "(sub-folders per scan). If None, falls back to "
+                             "pure supervised training.")
+    parser.add_argument("--ema_alpha", type=float, default=0.999,
+                        help="EMA decay for teacher weight update. "
+                             "Higher = slower teacher update. Typical: 0.99–0.999")
+    parser.add_argument("--consistency_weight", type=float, default=1.0,
+                        help="Maximum weight of the unsupervised consistency loss "
+                             "relative to the supervised loss")
+    parser.add_argument("--consistency_rampup", type=int, default=20,
+                        help="Number of epochs over which to ramp up the "
+                             "consistency loss weight from 0 to consistency_weight")
+    parser.add_argument("--unlabelled_batch_size", type=int, default=16,
+                        help="Batch size for unlabelled data loader")
+
     return parser.parse_args()

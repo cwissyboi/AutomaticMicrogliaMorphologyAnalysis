@@ -23,6 +23,8 @@ scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staf
 scp run_segmentation_cldice.sh ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation
 
 
+sacctmgr show user ccharlesworth withassoc Format='DefaultAccount,Account' --parsable # Check your account(s)
+
 scp -r custom_detection ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/
 
 scp -r YOLO_dataset_adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
