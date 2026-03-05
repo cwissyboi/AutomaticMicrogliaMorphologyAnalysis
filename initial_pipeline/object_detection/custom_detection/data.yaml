@@ -1,4 +1,4 @@
-path: ../../../YOLO_dataset_adjusted_2
+path: ../../../../DetectionDatasets/YOLO_dataset_fixed_bounding_boxes
 train: images/train
 val: images/val
 test: images/test

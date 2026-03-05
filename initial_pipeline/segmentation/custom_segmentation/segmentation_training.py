@@ -390,31 +390,16 @@ def main():
     # preprocess_segmentations()
     # print('segmentations ready')
 
-    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted_WithSoma" / "Segmentations"
+    SEGMENTATIONS_DIR = Path.cwd().parents[3] / "SegmentationDatasets" / "AnnotationsData_Adjusted_WithSoma" / "Segmentations"
 
     
     path_df = index_segmentations_df(
         SEGMENTATIONS_DIR,
         mask_name = 'masks'
     )
-
-    # mask_quality_df = pd.read_csv('mask_quality_summary.csv')
-    # mask_quality_df = mask_quality_df[['image_path', 'mask_quality']]
-
-
-    # mask_quality_df["image_path"] = mask_quality_df["image_path"].apply(Path)
-
-    # path_df = path_df.merge(mask_quality_df, on = 'image_path', how = 'inner')
-    # print(path_df.columns)
-
     # Only segment the entire cell ie. not just the SOMA
     path_df = path_df[path_df['class'] == 'MG_whole']
-    # # Remove all bad annotations
-    # path_df = path_df[~path_df['mask_quality'].isin(['bad', 'bad_image_quality', 'disagree'])]
 
-
-
-    # path_df = path_df.merg(mask_quality_df, on = )
     # Only take first 160 for now to train fast
     # path_df = path_df.head(40)
     print(len(path_df), "annotation pairs found")

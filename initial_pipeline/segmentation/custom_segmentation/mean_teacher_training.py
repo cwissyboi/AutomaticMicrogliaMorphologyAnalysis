@@ -594,12 +594,12 @@ def main():
     args = parse_mean_teacher_args()
     set_seed(42)
 
-    SEGMENTATIONS_DIR = Path.cwd().parents[2] / "AnnotationsData_Adjusted_WithSoma" / "Segmentations"
+    SEGMENTATIONS_DIR = Path.cwd().parents[3] / "SegmentationDatasets" / "AnnotationsData_Adjusted_WithSoma" / "Segmentations"
 
     path_df = index_segmentations_df(SEGMENTATIONS_DIR, mask_name='masks')
     path_df = path_df[path_df['class'] == 'MG_whole']
 
-    # path_df = path_df.head(40)
+    path_df = path_df.head(40)
     print(f"{len(path_df)} annotation pairs found")
 
     # ------------------------------------------------------------------
@@ -733,8 +733,6 @@ def main():
         student = UNet().to(device)
         teacher = create_ema_model(student).to(device) if use_mean_teacher else None
 
-        optimizer = torch.optim.Adam(student.parameters(), lr=1e-4)
-
         criterion = CombinedLoss(
             loss_type=args.loss_type,
             alpha=args.cldice_alpha,
@@ -744,44 +742,44 @@ def main():
         )
         print(f"Supervised loss: {args.loss_type}")
 
-        # Early stopping state
+        # ==================================================================
+        # PHASE 1 — Pure supervised pre-training
+        # ==================================================================
+        print(f"\n{'─'*70}")
+        print(f"PHASE 1 — Supervised pre-training  (lr=1e-4, patience={args.patience})")
+        print(f"{'─'*70}")
+
+        optimizer = torch.optim.Adam(student.parameters(), lr=1e-4)
+
         best_dice          = -float("inf")
         best_epoch         = -1
         epochs_no_improve  = 0
         best_student_state = None
 
-        for epoch in trange(args.epochs, desc="Training", unit="epoch"):
-            # Ramp-up consistency weight
-            if use_mean_teacher:
-                c_weight = args.consistency_weight * get_consistency_weight(
-                    epoch, args.consistency_rampup
-                )
-            else:
-                c_weight = 0.0
-
+        for epoch in trange(args.epochs, desc="Phase 1", unit="epoch"):
             loss_dict = train_epoch_mean_teacher(
                 student=student,
-                teacher=teacher,
+                teacher=None,           # no teacher in phase 1
                 labelled_loader=train_loader,
-                unlabelled_iter=unlabelled_iter,
+                unlabelled_iter=None,   # no unlabelled data in phase 1
                 device=device,
                 optimizer=optimizer,
                 criterion=criterion,
                 ema_alpha=args.ema_alpha,
-                consistency_w=c_weight,
+                consistency_w=0.0,      # consistency always off in phase 1
                 epoch=epoch,
                 fold=fold,
+                debug=False,            # no debug visuals needed in phase 1
             )
 
             val_metrics  = evaluate(student, val_loader,  device)
             test_metrics = evaluate(student, test_loader, device)
-
             current_dice = val_metrics["dice"]
 
             if current_dice > best_dice:
-                best_dice = current_dice
-                best_epoch = epoch
-                epochs_no_improve = 0
+                best_dice          = current_dice
+                best_epoch         = epoch
+                epochs_no_improve  = 0
                 best_student_state = {
                     k: v.detach().cpu().clone()
                     for k, v in student.state_dict().items()
@@ -792,14 +790,9 @@ def main():
                 epochs_no_improve += 1
                 status = f"no improve ({epochs_no_improve}/{args.patience})"
 
-            con_str = (
-                f"Consistency: {loss_dict['consistency']:.4f} (w={c_weight:.3f}) | "
-                if use_mean_teacher else ""
-            )
             tqdm.write(
-                f"Epoch {epoch:03d} | "
+                f"[P1] Epoch {epoch:03d} | "
                 f"Sup Loss: {loss_dict['supervised']:.4f} | "
-                f"{con_str}"
                 f"Val Dice: {current_dice:.4f} | "
                 f"Val IoU: {val_metrics['iou']:.4f} | "
                 f"Test Dice: {test_metrics['dice']:.4f} | "
@@ -809,13 +802,131 @@ def main():
 
             if epochs_no_improve >= args.patience:
                 tqdm.write(
-                    f"Early stopping at epoch {epoch}. "
-                    f"Best Dice {best_dice:.4f} at epoch {best_epoch}."
+                    f"[P1] Early stopping at epoch {epoch}. "
+                    f"Best Val Dice {best_dice:.4f} at epoch {best_epoch}."
                 )
                 break
 
-        # Restore best student weights
+        # Restore best supervised checkpoint
         student.load_state_dict(best_student_state)
+        student.to(device)
+
+        # Evaluate supervised-only performance (recorded for comparison)
+        supervised_only_metrics = evaluate(
+            student, test_loader, device, calculate_morphology_metric=True
+        )
+        print(
+            f"\n[P1] Supervised-only test | "
+            f"Dice: {supervised_only_metrics['dice']:.4f}, "
+            f"IoU: {supervised_only_metrics['iou']:.4f}, "
+            f"Morphology: {supervised_only_metrics['morphology']:.4f}"
+        )
+
+        # If no unlabelled data, skip phase 2 entirely
+        if not use_mean_teacher:
+            all_fold_metrics.append(supervised_only_metrics)
+            # still run the full region / postprocessed evaluations below
+            final_student_state = best_student_state
+        else:
+            # ==============================================================
+            # PHASE 2 — Semi-supervised fine-tuning
+            # ==============================================================
+            print(f"\n{'─'*70}")
+            print(
+                f"PHASE 2 — Semi-supervised fine-tuning  "
+                f"(lr={args.finetune_lr}, patience={args.finetune_patience})"
+            )
+            print(f"{'─'*70}")
+
+            # Initialise teacher from the converged supervised checkpoint
+            # so its predictions on unlabelled data are immediately useful.
+            teacher.load_state_dict(best_student_state)
+            teacher.to(device)
+
+            # Lower learning rate — model is already in a good basin.
+            optimizer = torch.optim.Adam(student.parameters(), lr=args.finetune_lr)
+
+            # Reset early stopping for phase 2
+            best_dice_ft         = best_dice   # must beat phase-1 to count as improvement
+            best_epoch_ft        = -1
+            epochs_no_improve_ft = 0
+            best_student_state_ft = best_student_state  # fallback: keep phase-1 weights
+
+            for epoch in trange(args.finetune_epochs, desc="Phase 2", unit="epoch"):
+                c_weight = args.consistency_weight * get_consistency_weight(
+                    epoch, args.consistency_rampup
+                )
+
+                loss_dict = train_epoch_mean_teacher(
+                    student=student,
+                    teacher=teacher,
+                    labelled_loader=train_loader,
+                    unlabelled_iter=unlabelled_iter,
+                    device=device,
+                    optimizer=optimizer,
+                    criterion=criterion,
+                    ema_alpha=args.ema_alpha,
+                    consistency_w=c_weight,
+                    epoch=epoch,
+                    fold=fold,
+                    debug=True,
+                )
+
+                val_metrics  = evaluate(student, val_loader,  device)
+                test_metrics = evaluate(student, test_loader, device)
+                current_dice = val_metrics["dice"]
+
+                if current_dice > best_dice_ft:
+                    best_dice_ft          = current_dice
+                    best_epoch_ft         = epoch
+                    epochs_no_improve_ft  = 0
+                    best_student_state_ft = {
+                        k: v.detach().cpu().clone()
+                        for k, v in student.state_dict().items()
+                    }
+                    save_model_with_timestamp(student)
+                    status = "NEW BEST"
+                else:
+                    epochs_no_improve_ft += 1
+                    status = f"no improve ({epochs_no_improve_ft}/{args.finetune_patience})"
+
+                tqdm.write(
+                    f"[P2] Epoch {epoch:03d} | "
+                    f"Sup Loss: {loss_dict['supervised']:.4f} | "
+                    f"Consistency: {loss_dict['consistency']:.4f} (w={c_weight:.3f}) | "
+                    f"Val Dice: {current_dice:.4f} | "
+                    f"Val IoU: {val_metrics['iou']:.4f} | "
+                    f"Test Dice: {test_metrics['dice']:.4f} | "
+                    f"Test IoU: {test_metrics['iou']:.4f} | "
+                    f"{status}"
+                )
+
+                if epochs_no_improve_ft >= args.finetune_patience:
+                    tqdm.write(
+                        f"[P2] Early stopping at epoch {epoch}. "
+                        f"Best Val Dice {best_dice_ft:.4f} at epoch {best_epoch_ft}."
+                    )
+                    break
+
+            # Restore best fine-tuned weights (or phase-1 weights if no improvement)
+            student.load_state_dict(best_student_state_ft)
+            student.to(device)
+
+            if best_epoch_ft == -1:
+                tqdm.write(
+                    "[P2] Semi-supervised fine-tuning did not improve over "
+                    "supervised pre-training. Using phase-1 weights for evaluation."
+                )
+            else:
+                tqdm.write(
+                    f"[P2] Fine-tuning improved Val Dice: "
+                    f"{supervised_only_metrics['dice']:.4f} → {best_dice_ft:.4f}"
+                )
+
+            final_student_state = best_student_state_ft
+
+        # Restore final weights before evaluation (no-op if already loaded above)
+        student.load_state_dict(final_student_state)
         student.to(device)
 
         # ------------------------------------------------------------------

@@ -206,4 +206,15 @@ def parse_mean_teacher_args():
     parser.add_argument("--unlabelled_batch_size", type=int, default=16,
                         help="Batch size for unlabelled data loader")
 
+    # ---- Two-phase training args ------------------------------------------
+    parser.add_argument("--finetune_epochs", type=int, default=100,
+                        help="Max epochs for phase 2 semi-supervised fine-tuning. "
+                             "Only used when --unlabelled_dir is provided.")
+    parser.add_argument("--finetune_patience", type=int, default=10,
+                        help="Early stopping patience for phase 2 fine-tuning.")
+    parser.add_argument("--finetune_lr", type=float, default=1e-5,
+                        help="Learning rate for phase 2 fine-tuning. Should be "
+                             "lower than phase 1 LR since the model is already "
+                             "converged. Default: 1e-5 (10x lower than phase 1).")
+
     return parser.parse_args()
