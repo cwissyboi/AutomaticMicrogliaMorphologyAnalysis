@@ -11,7 +11,7 @@ def downsample = 1.0
 // --------------------------------------------------
 // Base output directory
 // --------------------------------------------------
-def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled"
+def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled_whole_box_in_GM"
 mkdirs(baseOutDir)
 
 // --------------------------------------------------
@@ -56,20 +56,23 @@ for (int y = 0; y < height; y += tileSize) {
 
         try {
 
-            // ---- Compute tile center first (cheap operation) ----
-            double centerX = x + tileSize / 2.0
-            double centerY = y + tileSize / 2.0
+        // ---- Check that ALL four corners are inside gray matter ----
+            // This ensures the entire tile is within gray matter (no white matter included)
+            def corners = [
+                [x,            y           ],
+                [x + tileSize, y           ],
+                [x,            y + tileSize],
+                [x + tileSize, y + tileSize]
+            ]
 
-            boolean isGray = false
-            for (ann in grayAnnotations) {
-                if (ann.getROI().contains(centerX, centerY)) {
-                    isGray = true
-                    break
+            boolean isFullyGray = corners.every { corner ->
+                grayAnnotations.any { ann ->
+                    ann.getROI().contains(corner[0] as double, corner[1] as double)
                 }
             }
 
-            // ---- Skip if not gray matter ----
-            if (!isGray)
+            // ---- Skip if any corner is outside gray matter ----
+            if (!isFullyGray)
                 continue
 
             // ---- Only read image if gray ----

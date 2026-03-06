@@ -14,6 +14,8 @@ scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 
 scp -r AnnotationsData_Adjusted_WithSoma ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
+scp -r AnnotationsData_Adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/SegmentationDatasets/
+
 scp -r YOLO_rat_adjusted_2_split ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r YOLO_dataset_adjusted_2 ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
