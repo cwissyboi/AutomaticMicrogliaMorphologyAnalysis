@@ -32,8 +32,8 @@ srun python mean_teacher_training.py \
     --loss_type bce_cldice \
     --cldice_alpha 0.5 \
     --ema_alpha 0.999 \
-    --consistency_weight 10.0 \
-    --consistency_rampup 50 \
+    --consistency_weight 2.0 \
+    --consistency_rampup 20 \
     --unlabelled_batch_size 16 \
     --joint_training \
     --finetune_epochs 200 \

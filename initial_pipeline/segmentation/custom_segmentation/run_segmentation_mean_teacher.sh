@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=general
 #SBATCH --qos=short
-#SBATCH --time=1:45:00
+#SBATCH --time=4:45:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=64G
@@ -26,11 +26,11 @@ srun python mean_teacher_training.py \
     --loss_type bce_cldice \
     --cldice_alpha 0.5 \
     --ema_alpha 0.999 \
-    --consistency_weight 20.0 \
+    --consistency_weight 2.0 \
     --consistency_rampup 0 \
     --unlabelled_batch_size 16 \
     --epochs 100 \
     --patience 10 \
-    --finetune_epochs 100 \
-    --finetune_patience 10 \
+    --finetune_epochs 20 \
+    --finetune_patience 30 \
     --finetune_lr 1e-5
