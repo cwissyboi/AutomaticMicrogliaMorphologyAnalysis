@@ -290,8 +290,8 @@ def plot_learning_curves(
                 linewidth=2, markersize=6, label=label)
         ax.fill_between(
             portions_pct,
-            np.clip(values - stds, 0, 1),
-            np.clip(values + stds, 0, 1),
+            values - stds,
+            values + stds,
             alpha=0.20, color=color, label="±1 std",
         )
 
@@ -303,11 +303,16 @@ def plot_learning_curves(
             fontsize=9, color=color,
         )
 
+        # Y-axis: fit tightly around the data (including std bands) with 5% padding
+        y_lo = (values - stds).min()
+        y_hi = (values + stds).max()
+        pad  = (y_hi - y_lo) * 0.05 or 0.02   # fallback if range is zero
+        ax.set_ylim(y_lo - pad, y_hi + pad)
+
         ax.set_title(label, fontsize=12)
         ax.set_xlabel("Training data used (%)", fontsize=10)
         ax.set_ylabel(label, fontsize=10)
         ax.set_xlim(0, 105)
-        ax.set_ylim(0, 1.05)
         ax.set_xticks(portions_pct)
         ax.grid(True, linestyle="--", alpha=0.5)
 
