@@ -29,8 +29,8 @@ srun python mean_teacher_training.py \
     --consistency_weight 50.0 \
     --consistency_rampup 0 \
     --unlabelled_batch_size 16 \
-    --epochs 0 \
-    --patience 0 \
+    --epochs 1 \
+    --patience 1 \
     --finetune_epochs 100 \
     --finetune_patience 10 \
     --finetune_lr 1e-5
