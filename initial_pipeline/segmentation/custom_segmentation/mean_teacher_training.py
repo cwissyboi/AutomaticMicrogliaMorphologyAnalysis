@@ -638,7 +638,7 @@ def main():
     path_df = index_segmentations_df(SEGMENTATIONS_DIR, mask_name='masks')
     path_df = path_df[path_df['class'] == 'MG_whole']
 
-    path_df = path_df.head(40)
+    # path_df = path_df.head(40)
     print(f"{len(path_df)} annotation pairs found")
 
     # ------------------------------------------------------------------
