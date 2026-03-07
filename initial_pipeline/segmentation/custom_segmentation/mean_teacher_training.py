@@ -327,26 +327,34 @@ def train_epoch_mean_teacher(
     device, optimizer, criterion,
     ema_alpha, consistency_w,
     epoch=0, fold=0, debug=True,
+    pseudo_label_threshold=None,
 ):
     """
     One epoch of Mean Teacher training.
 
     Args:
-        student:           Student UNet (receives gradient updates).
-        teacher:           Teacher UNet (EMA copy, no gradients).
-        labelled_loader:   DataLoader yielding (image, mask) pairs.
-        unlabelled_iter:   Infinite iterator over UnlabelledCellDataset
-                           yielding (student_view, teacher_view) pairs.
-                           Pass None to run pure supervised.
-        device:            Torch device.
-        optimizer:         Student optimizer.
-        criterion:         CombinedLoss for the supervised term.
-        ema_alpha:         EMA decay coefficient for teacher update.
-        consistency_w:     Current (ramped) consistency loss weight.
-        epoch:             Current epoch index (used for debug filenames).
-        fold:              Current CV fold index (used for debug filenames).
-        debug:             If True, save debug visualisations on the first batch
-                           of every 10th epoch (epochs 0, 10, 20, ...).
+        student:                Student UNet (receives gradient updates).
+        teacher:                Teacher UNet (EMA copy, no gradients).
+        labelled_loader:        DataLoader yielding (image, mask) pairs.
+        unlabelled_iter:        Infinite iterator over UnlabelledCellDataset
+                                yielding (student_view, teacher_view) pairs.
+                                Pass None to run pure supervised.
+        device:                 Torch device.
+        optimizer:              Student optimizer.
+        criterion:              CombinedLoss for the supervised term.
+        ema_alpha:              EMA decay coefficient for teacher update.
+        consistency_w:          Current (ramped) consistency loss weight.
+        epoch:                  Current epoch index (used for debug filenames).
+        fold:                   Current CV fold index (used for debug filenames).
+        debug:                  If True, save debug visualisations on the first
+                                batch of every 10th epoch (epochs 0, 10, 20, ...).
+        pseudo_label_threshold: If not None (Exp 6), replace the soft MSE
+                                consistency loss with a hard pseudo-label loss.
+                                Teacher predictions whose mean confidence exceeds
+                                this threshold are binarised and fed as ground-truth
+                                to the student's supervised loss. Crops below the
+                                threshold are skipped. When set, consistency_w is
+                                used as the weight for the pseudo-label term.
 
     Returns:
         dict with keys 'supervised', 'consistency', 'total' — average losses.
@@ -372,7 +380,7 @@ def train_epoch_mean_teacher(
         student_logits_lab = student(x_lab)
         sup_loss = criterion(student_logits_lab, y_lab)
 
-        # ---- consistency term (skip if no unlabelled data) -----------------
+        # ---- consistency / pseudo-label term (skip if no unlabelled data) --
         con_loss = torch.tensor(0.0, device=device)
 
         if unlabelled_iter is not None and consistency_w > 0.0:
@@ -384,48 +392,79 @@ def train_epoch_mean_teacher(
                 x_student = x_student.to(device)
                 x_teacher = x_teacher.to(device)
 
-                # Student forward on its own augmented view
-                student_logits_u = student(x_student)
+                if pseudo_label_threshold is not None:
+                    # ---- Exp 6: pseudo-label mode ----------------------------
+                    # Teacher produces predictions on one augmented view.
+                    # Crops whose mean confidence exceeds the threshold are
+                    # binarised and used as pseudo-GT for the student's own
+                    # augmented view.  Low-confidence crops are skipped.
+                    with torch.no_grad():
+                        teacher_probs = torch.sigmoid(teacher(x_teacher))  # (B,1,H,W)
 
-                # Teacher forward on its own independently augmented view
-                with torch.no_grad():
-                    teacher_logits_u = teacher(x_teacher)
+                    # Mean confidence per crop (mean over all pixels)
+                    mean_conf = teacher_probs.mean(dim=[1, 2, 3])  # (B,)
+                    confident_mask = mean_conf >= pseudo_label_threshold  # bool (B,)
 
-                # Invert each prediction back to canonical (original) space so
-                # the pixel-wise MSE compares spatially aligned outputs.
-                student_logits_inv = torch.stack([
-                    invert_spatial_replay(
-                        student_logits_u[i],   # (1, H, W)
-                        student_replays[i] if student_replays is not None else None,
-                    )
-                    for i in range(student_logits_u.shape[0])
-                ])  # → (B, 1, H, W)
+                    if confident_mask.any():
+                        x_student_conf = x_student[confident_mask]
+                        pseudo_labels  = (teacher_probs[confident_mask] >= 0.5).float()
 
-                teacher_logits_inv = torch.stack([
-                    invert_spatial_replay(
-                        teacher_logits_u[i],   # (1, H, W)
-                        teacher_replays[i] if teacher_replays is not None else None,
-                    )
-                    for i in range(teacher_logits_u.shape[0])
-                ])  # → (B, 1, H, W)
+                        student_logits_u = student(x_student_conf)
+                        con_loss = criterion(student_logits_u, pseudo_labels)
 
-                # Both inverted preds are now in canonical orientation → MSE
-                con_loss = consistency_loss(student_logits_inv, teacher_logits_inv)
+                        if _save_debug_this_epoch and not _debug_saved_this_epoch:
+                            n_conf = confident_mask.sum().item()
+                            tqdm.write(
+                                f"[debug] Pseudo-label: {n_conf}/{x_student.shape[0]} "
+                                f"confident crops (threshold={pseudo_label_threshold})"
+                            )
+                            _debug_saved_this_epoch = True
+                    # else: no confident crops this batch — con_loss stays 0.0
 
-                # Debug: save all 8 panels side-by-side
-                if _save_debug_this_epoch and not _debug_saved_this_epoch:
-                    save_debug_visuals(
-                        x_orig=x_u_orig.detach(),
-                        x_student=x_student.detach(),
-                        x_teacher=x_teacher.detach(),
-                        student_logits_u=student_logits_u.detach(),
-                        teacher_logits_u=teacher_logits_u.detach(),
-                        student_logits_inv=student_logits_inv.detach(),
-                        teacher_logits_inv=teacher_logits_inv.detach(),
-                        epoch=epoch,
-                        fold=fold,
-                    )
-                    _debug_saved_this_epoch = True
+                else:
+                    # ---- Default: soft MSE consistency loss ------------------
+                    # Student forward on its own augmented view
+                    student_logits_u = student(x_student)
+
+                    # Teacher forward on its own independently augmented view
+                    with torch.no_grad():
+                        teacher_logits_u = teacher(x_teacher)
+
+                    # Invert each prediction back to canonical (original) space so
+                    # the pixel-wise MSE compares spatially aligned outputs.
+                    student_logits_inv = torch.stack([
+                        invert_spatial_replay(
+                            student_logits_u[i],   # (1, H, W)
+                            student_replays[i] if student_replays is not None else None,
+                        )
+                        for i in range(student_logits_u.shape[0])
+                    ])  # → (B, 1, H, W)
+
+                    teacher_logits_inv = torch.stack([
+                        invert_spatial_replay(
+                            teacher_logits_u[i],   # (1, H, W)
+                            teacher_replays[i] if teacher_replays is not None else None,
+                        )
+                        for i in range(teacher_logits_u.shape[0])
+                    ])  # → (B, 1, H, W)
+
+                    # Both inverted preds are now in canonical orientation → MSE
+                    con_loss = consistency_loss(student_logits_inv, teacher_logits_inv)
+
+                    # Debug: save all 8 panels side-by-side
+                    if _save_debug_this_epoch and not _debug_saved_this_epoch:
+                        save_debug_visuals(
+                            x_orig=x_u_orig.detach(),
+                            x_student=x_student.detach(),
+                            x_teacher=x_teacher.detach(),
+                            student_logits_u=student_logits_u.detach(),
+                            teacher_logits_u=teacher_logits_u.detach(),
+                            student_logits_inv=student_logits_inv.detach(),
+                            teacher_logits_inv=teacher_logits_inv.detach(),
+                            epoch=epoch,
+                            fold=fold,
+                        )
+                        _debug_saved_this_epoch = True
 
         # ---- total loss & optimisation -------------------------------------
         total_loss = sup_loss + consistency_w * con_loss
@@ -612,7 +651,14 @@ def main():
         print(f"  EMA alpha           : {args.ema_alpha}")
         print(f"  Consistency weight  : {args.consistency_weight}")
         print(f"  Consistency rampup  : {args.consistency_rampup} epochs")
-        print(f"  Unlabelled batch    : {args.unlabelled_batch_size}\n")
+        print(f"  Unlabelled batch    : {args.unlabelled_batch_size}")
+        print(f"  Photometric aug     : {'ENABLED' if args.photometric_augmentation else 'disabled'}")
+        print(f"  Joint training      : {'ENABLED (no separate Phase 1)' if args.joint_training else 'disabled (Phase 1 + Phase 2)'}")
+        if args.pseudo_label_threshold is not None:
+            print(f"  Pseudo-label mode   : ENABLED (threshold={args.pseudo_label_threshold})")
+        else:
+            print(f"  Consistency mode    : soft MSE")
+        print()
     else:
         print("\nNo --unlabelled_dir provided. Running pure supervised training.\n")
 
@@ -628,13 +674,27 @@ def main():
 
     # Unlabelled — ReplayCompose records which flips/rotations fired so the
     # training loop can invert them on the teacher's output before MSE.
-    unlabelled_tfms = A.ReplayCompose([
+    # Exp 4: optionally add photometric perturbations (colour jitter, blur,
+    # noise). These are NOT inverted, so the consistency loss forces invariance
+    # to appearance changes — giving a genuine training signal beyond geometry.
+    _unlabelled_spatial = [
         A.Resize(256, 256),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        ToTensorV2()
-    ])
+    ]
+    _unlabelled_photometric = [
+        A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05, p=0.8),
+        A.GaussianBlur(blur_limit=(3, 7), p=0.5),
+        A.GaussNoise(var_limit=(10.0, 50.0), p=0.5),
+    ] if args.photometric_augmentation else []
+
+    unlabelled_tfms = A.ReplayCompose(
+        _unlabelled_spatial + _unlabelled_photometric + [ToTensorV2()]
+    )
+
+    if args.photometric_augmentation:
+        print("  Photometric augmentation: ENABLED (ColorJitter + GaussianBlur + GaussNoise)")
 
     test_tfms = A.Compose([
         A.Resize(256, 256),
@@ -744,83 +804,100 @@ def main():
 
         # ==================================================================
         # PHASE 1 — Pure supervised pre-training
+        # (Skipped when --joint_training is set)
         # ==================================================================
-        print(f"\n{'─'*70}")
-        print(f"PHASE 1 — Supervised pre-training  (lr=1e-4, patience={args.patience})")
-        print(f"{'─'*70}")
+        if args.joint_training and use_mean_teacher:
+            # Exp 2: skip Phase 1 entirely — initialise teacher from the
+            # randomly-initialised student and train everything jointly.
+            print(f"\n{'─'*70}")
+            print(f"JOINT TRAINING MODE — skipping pure supervised Phase 1")
+            print(f"  lr={args.finetune_lr}, patience={args.finetune_patience}")
+            print(f"{'─'*70}")
 
-        optimizer = torch.optim.Adam(student.parameters(), lr=1e-4)
+            # Teacher starts from the same random init as the student.
+            # The rampup schedule ensures consistency stays near 0 early on,
+            # letting the supervised signal dominate and give the teacher
+            # time to develop meaningful predictions before MT kicks in.
+            best_student_state    = None
+            best_dice             = -float("inf")
+            supervised_only_metrics = None  # no supervised-only checkpoint
+        else:
+            print(f"\n{'─'*70}")
+            print(f"PHASE 1 — Supervised pre-training  (lr=1e-4, patience={args.patience})")
+            print(f"{'─'*70}")
 
-        best_dice          = -float("inf")
-        best_epoch         = -1
-        epochs_no_improve  = 0
-        best_student_state = None
+            optimizer = torch.optim.Adam(student.parameters(), lr=1e-4)
 
-        for epoch in trange(args.epochs, desc="Phase 1", unit="epoch"):
-            loss_dict = train_epoch_mean_teacher(
-                student=student,
-                teacher=None,           # no teacher in phase 1
-                labelled_loader=train_loader,
-                unlabelled_iter=None,   # no unlabelled data in phase 1
-                device=device,
-                optimizer=optimizer,
-                criterion=criterion,
-                ema_alpha=args.ema_alpha,
-                consistency_w=0.0,      # consistency always off in phase 1
-                epoch=epoch,
-                fold=fold,
-                debug=False,            # no debug visuals needed in phase 1
-            )
+            best_dice          = -float("inf")
+            best_epoch         = -1
+            epochs_no_improve  = 0
+            best_student_state = None
 
-            val_metrics  = evaluate(student, val_loader,  device)
-            test_metrics = evaluate(student, test_loader, device)
-            current_dice = val_metrics["dice"]
-
-            if current_dice > best_dice:
-                best_dice          = current_dice
-                best_epoch         = epoch
-                epochs_no_improve  = 0
-                best_student_state = {
-                    k: v.detach().cpu().clone()
-                    for k, v in student.state_dict().items()
-                }
-                save_model_with_timestamp(student)
-                status = "NEW BEST"
-            else:
-                epochs_no_improve += 1
-                status = f"no improve ({epochs_no_improve}/{args.patience})"
-
-            tqdm.write(
-                f"[P1] Epoch {epoch:03d} | "
-                f"Sup Loss: {loss_dict['supervised']:.4f} | "
-                f"Val Dice: {current_dice:.4f} | "
-                f"Val IoU: {val_metrics['iou']:.4f} | "
-                f"Test Dice: {test_metrics['dice']:.4f} | "
-                f"Test IoU: {test_metrics['iou']:.4f} | "
-                f"{status}"
-            )
-
-            if epochs_no_improve >= args.patience:
-                tqdm.write(
-                    f"[P1] Early stopping at epoch {epoch}. "
-                    f"Best Val Dice {best_dice:.4f} at epoch {best_epoch}."
+            for epoch in trange(args.epochs, desc="Phase 1", unit="epoch"):
+                loss_dict = train_epoch_mean_teacher(
+                    student=student,
+                    teacher=None,           # no teacher in phase 1
+                    labelled_loader=train_loader,
+                    unlabelled_iter=None,   # no unlabelled data in phase 1
+                    device=device,
+                    optimizer=optimizer,
+                    criterion=criterion,
+                    ema_alpha=args.ema_alpha,
+                    consistency_w=0.0,      # consistency always off in phase 1
+                    epoch=epoch,
+                    fold=fold,
+                    debug=False,            # no debug visuals needed in phase 1
                 )
-                break
 
-        # Restore best supervised checkpoint
-        student.load_state_dict(best_student_state)
-        student.to(device)
+                val_metrics  = evaluate(student, val_loader,  device)
+                test_metrics = evaluate(student, test_loader, device)
+                current_dice = val_metrics["dice"]
 
-        # Evaluate supervised-only performance (recorded for comparison)
-        supervised_only_metrics = evaluate(
-            student, test_loader, device, calculate_morphology_metric=True
-        )
-        print(
-            f"\n[P1] Supervised-only test | "
-            f"Dice: {supervised_only_metrics['dice']:.4f}, "
-            f"IoU: {supervised_only_metrics['iou']:.4f}, "
-            f"Morphology: {supervised_only_metrics['morphology']:.4f}"
-        )
+                if current_dice > best_dice:
+                    best_dice          = current_dice
+                    best_epoch         = epoch
+                    epochs_no_improve  = 0
+                    best_student_state = {
+                        k: v.detach().cpu().clone()
+                        for k, v in student.state_dict().items()
+                    }
+                    save_model_with_timestamp(student)
+                    status = "NEW BEST"
+                else:
+                    epochs_no_improve += 1
+                    status = f"no improve ({epochs_no_improve}/{args.patience})"
+
+                tqdm.write(
+                    f"[P1] Epoch {epoch:03d} | "
+                    f"Sup Loss: {loss_dict['supervised']:.4f} | "
+                    f"Val Dice: {current_dice:.4f} | "
+                    f"Val IoU: {val_metrics['iou']:.4f} | "
+                    f"Test Dice: {test_metrics['dice']:.4f} | "
+                    f"Test IoU: {test_metrics['iou']:.4f} | "
+                    f"{status}"
+                )
+
+                if epochs_no_improve >= args.patience:
+                    tqdm.write(
+                        f"[P1] Early stopping at epoch {epoch}. "
+                        f"Best Val Dice {best_dice:.4f} at epoch {best_epoch}."
+                    )
+                    break
+
+            # Restore best supervised checkpoint
+            student.load_state_dict(best_student_state)
+            student.to(device)
+
+            # Evaluate supervised-only performance (recorded for comparison)
+            supervised_only_metrics = evaluate(
+                student, test_loader, device, calculate_morphology_metric=True
+            )
+            print(
+                f"\n[P1] Supervised-only test | "
+                f"Dice: {supervised_only_metrics['dice']:.4f}, "
+                f"IoU: {supervised_only_metrics['iou']:.4f}, "
+                f"Morphology: {supervised_only_metrics['morphology']:.4f}"
+            )
 
         # If no unlabelled data, skip phase 2 entirely
         if not use_mean_teacher:
@@ -830,29 +907,38 @@ def main():
         else:
             # ==============================================================
             # PHASE 2 — Semi-supervised fine-tuning
+            # (Also serves as the single joint-training phase when
+            #  --joint_training is set)
             # ==============================================================
+            if args.joint_training:
+                phase_label = "JOINT TRAINING"
+            else:
+                phase_label = "PHASE 2 — Semi-supervised fine-tuning"
+
             print(f"\n{'─'*70}")
             print(
-                f"PHASE 2 — Semi-supervised fine-tuning  "
+                f"{phase_label}  "
                 f"(lr={args.finetune_lr}, patience={args.finetune_patience})"
             )
             print(f"{'─'*70}")
 
             # Initialise teacher from the converged supervised checkpoint
-            # so its predictions on unlabelled data are immediately useful.
-            teacher.load_state_dict(best_student_state)
+            # (or from random init if joint training).
+            if best_student_state is not None:
+                teacher.load_state_dict(best_student_state)
             teacher.to(device)
 
-            # Lower learning rate — model is already in a good basin.
+            # Use finetune_lr for Phase 2 / joint training.
             optimizer = torch.optim.Adam(student.parameters(), lr=args.finetune_lr)
 
-            # Reset early stopping for phase 2
+            # Reset early stopping for phase 2 / joint training.
+            # For joint training best_dice starts at -inf so any improvement counts.
             best_dice_ft         = best_dice   # must beat phase-1 to count as improvement
             best_epoch_ft        = -1
             epochs_no_improve_ft = 0
-            best_student_state_ft = best_student_state  # fallback: keep phase-1 weights
+            best_student_state_ft = best_student_state  # fallback: keep phase-1 weights (or None for joint)
 
-            for epoch in trange(args.finetune_epochs, desc="Phase 2", unit="epoch"):
+            for epoch in trange(args.finetune_epochs, desc=phase_label, unit="epoch"):
                 c_weight = args.consistency_weight * get_consistency_weight(
                     epoch, args.consistency_rampup
                 )
@@ -870,6 +956,7 @@ def main():
                     epoch=epoch,
                     fold=fold,
                     debug=True,
+                    pseudo_label_threshold=args.pseudo_label_threshold,
                 )
 
                 val_metrics  = evaluate(student, val_loader,  device)
@@ -918,10 +1005,16 @@ def main():
                     "supervised pre-training. Using phase-1 weights for evaluation."
                 )
             else:
-                tqdm.write(
-                    f"[P2] Fine-tuning improved Val Dice: "
-                    f"{supervised_only_metrics['dice']:.4f} → {best_dice_ft:.4f}"
-                )
+                if supervised_only_metrics is not None:
+                    tqdm.write(
+                        f"[P2] Fine-tuning improved Val Dice: "
+                        f"{supervised_only_metrics['dice']:.4f} → {best_dice_ft:.4f}"
+                    )
+                else:
+                    tqdm.write(
+                        f"[Joint] Best Val Dice: {best_dice_ft:.4f} "
+                        f"at epoch {best_epoch_ft}"
+                    )
 
             final_student_state = best_student_state_ft
 

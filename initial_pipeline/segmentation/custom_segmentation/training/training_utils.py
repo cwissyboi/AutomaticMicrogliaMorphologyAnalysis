@@ -217,4 +217,32 @@ def parse_mean_teacher_args():
                              "lower than phase 1 LR since the model is already "
                              "converged. Default: 1e-5 (10x lower than phase 1).")
 
+    # ---- Exp 4: photometric augmentation for unlabelled data -----------------
+    parser.add_argument("--photometric_augmentation", action="store_true",
+                        default=False,
+                        help="Add colour jitter, Gaussian blur and Gaussian noise "
+                             "to the unlabelled augmentation pipeline. These are NOT "
+                             "inverted before the consistency loss, forcing the student "
+                             "and teacher to produce invariant predictions across "
+                             "photometric perturbations.")
+
+    # ---- Exp 2: joint training from scratch (no separate Phase 1) -----------
+    parser.add_argument("--joint_training", action="store_true",
+                        default=False,
+                        help="Skip the pure supervised Phase 1 pre-training and run "
+                             "supervised + Mean Teacher consistency jointly from epoch 0. "
+                             "Uses --finetune_lr as the learning rate throughout and "
+                             "--consistency_rampup to gradually introduce the consistency "
+                             "term. Requires --unlabelled_dir.")
+
+    # ---- Exp 6: pseudo-label mode -------------------------------------------
+    parser.add_argument("--pseudo_label_threshold", type=float, default=None,
+                        help="If set, replace the soft MSE consistency loss with a "
+                             "hard pseudo-label supervised loss on unlabelled crops. "
+                             "Teacher predictions with mean confidence above this "
+                             "threshold (e.g. 0.8) are binarised and used as pseudo "
+                             "ground-truth masks for the student supervised loss. "
+                             "Crops below the threshold are skipped. "
+                             "Mutually exclusive with the default soft MSE consistency.")
+
     return parser.parse_args()
