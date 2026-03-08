@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
-#SBATCH --output=run_segmentation_mean_teacher_joint_pseudo_label.out
-#SBATCH --error=run_segmentation_mean_teacher_joint_pseudo_label.err
+#SBATCH --output=run_segmentation_mean_teacher_joint_pseudo_label_w_1.out
+#SBATCH --error=run_segmentation_mean_teacher_joint_pseudo_label_w_1.err
 #SBATCH --mail-type=END
 
 module use /opt/insy/modulefiles
@@ -32,7 +32,7 @@ srun python mean_teacher_training.py \
     --loss_type bce_cldice \
     --cldice_alpha 0.5 \
     --ema_alpha 0.999 \
-    --consistency_weight 2.0 \
+    --consistency_weight 1 \
     --consistency_rampup 20 \
     --unlabelled_batch_size 16 \
     --joint_training \

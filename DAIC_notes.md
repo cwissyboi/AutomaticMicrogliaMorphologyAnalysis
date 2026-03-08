@@ -50,8 +50,7 @@ scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 Copy a folder from DAIC to computer 
 scp -r [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefolder ./
 
-scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/learning_curve_runs/lc_20260307_114141 ./
-
+scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/learning_curve_runs/lc_20260307_114141/learning_curve_2x2.png .
 Home directory /home/nfs/ccharlesworth
 
 submit job
@@ -60,7 +59,7 @@ sbatch job_file.sh
 squeue - check the status of jobs on the system
 scancel - cancel a job and delete it from the queue
 
-scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints/best_run_25_1.pth ./
+scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints/best_run_25_1.pth ./learning_curve_2x2.png 
 
 
 Links 
@@ -133,3 +132,6 @@ python segmentation_training.py --add_new_components True --disconnect_component
 
 
 numpy 1.26.4
+
+
+sacct -u $USER --format=JobID,JobName,Partition,State,Elapsed,Start,End

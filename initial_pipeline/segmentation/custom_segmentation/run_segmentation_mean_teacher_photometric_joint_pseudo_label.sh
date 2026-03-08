@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --partition=general
 #SBATCH --qos=long
-#SBATCH --time=4:00:00
+#SBATCH --time=5:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=64G
+#SBATCH --mem=8G
 #SBATCH --gres=gpu:1
 #SBATCH --output=run_segmentation_mean_teacher_photometric_joint_pseudo_label.out
 #SBATCH --error=run_segmentation_mean_teacher_photometric_joint_pseudo_label.err
