@@ -81,7 +81,8 @@ pip install -r initial_pipeline_requirements.txt
 
 ```bash
 cd initial_pipeline
-python main.py --input_folder_path "C:\Users\chris\Desktop\University\Thesis\ScanData\10_patients_GM_tiles" --output_name 10_patients_GM_tiles
+python main.py --input_folder_path "../../ScanData/slide_001_tiles" --output_name experiment_001 --scan_name slide_001
+python debug_morphology.py --input_folder_path "C:\Users\chris\Desktop\University\Thesis\ScanData\10_patients_GM_tiles" --max_cells 30
 python yolo_inference_only.py --input_folder_path ../../../All_scans_tiled_subset --output_name yolo_for_semi_supervised
 ```
 
@@ -89,12 +90,13 @@ python yolo_inference_only.py --input_folder_path ../../../All_scans_tiled_subse
 python segmentation_training.py --loss_type cldice
 
 python segmentation_training.py --loss_type bce_cldice --cldice_alpha 0.5
-python main.py --input_folder_path ../tiles/slide_4_512/ --output_name slide_4_512
+python main.py --input_folder_path ../tiles/slide_4_512/ --output_name slide_4_512 --scan_name slide_4_512
 
 ### Arguments
 
-- `--input_folder_path`: Path to folder containing input images (required)
+- `--input_folder_path`: Path to folder containing input images for a single scan (required)
 - `--output_name`: Name for output files and folders (required)
+- `--scan_name`: Name of the scan being processed; included in the output CSV filename (optional)
 
 ### Input Format
 
@@ -134,13 +136,14 @@ initial_pipeline/morphology/morphology_outputs/{output_name}.csv
 ### Example Workflow
 
 ```bash
-# Process a single slide
+# Process a single scan
 cd initial_pipeline
-python main.py --input_folder_path ../data/slide_001/ --output_name experiment_001
+python main.py --input_folder_path ../data/slide_001/ --output_name experiment_001 --scan_name slide_001
+# Output: morphology/morphology_outputs/experiment_001_slide_001.csv
 
-# Process multiple slides by running multiple times
-python main.py --input_folder_path ../data/slide_002/ --output_name experiment_002
-python main.py --input_folder_path ../data/slide_003/ --output_name experiment_003
+# Process multiple scans by running once per scan
+python main.py --input_folder_path ../data/slide_002/ --output_name experiment_001 --scan_name slide_002
+python main.py --input_folder_path ../data/slide_003/ --output_name experiment_001 --scan_name slide_003
 
 # The CSV outputs can then be combined for analysis
 ```

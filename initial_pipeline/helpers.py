@@ -32,6 +32,13 @@ def parse_args():
         help="will be used as both a directory and csv file name"
     )
 
+    parser.add_argument(
+        "--scan_name",
+        type=str,
+        default=None,
+        help="Name of the scan being processed; included in the output CSV filename"
+    )
+
     # YOLO files
     parser.add_argument(
         "--cfg",

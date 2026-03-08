@@ -23,6 +23,7 @@ def main():
     args = parse_args()
     input_folder_path = args["input_folder_path"]
     output_name = args["output_name"]
+    scan_name = args["scan_name"]
 
     print("custom yolo")
     yolo = YOLO(r"object_detection/custom_detection/yolo_good_runs/28_2_rat_pretraining.pt")
@@ -49,23 +50,16 @@ def main():
     input_dir = Path(input_folder_path)
     all_results = []
 
-    scan_folders = [p for p in input_dir.iterdir() if p.is_dir()]
+    image_paths = [p for p in input_dir.iterdir() if p.is_file()]
     counter = 0
 
-    for scan_folder in scan_folders:
-
-        scan_folder_name = scan_folder.name
-        print(f"\nProcessing scan folder: {scan_folder_name}")
-
-        image_paths = list(scan_folder.iterdir())
-
-        for image_path in tqdm(image_paths, desc=f"Images in {scan_folder_name}"):
+    for image_path in tqdm(image_paths, desc=f"Images in {scan_name or input_dir.name}"):
 
             if not image_path.is_file():
                 continue
 
-            if (counter > 10): 
-                break
+            # if (counter > 15): 
+            #     break
 
             counter = counter + 1
 
@@ -82,7 +76,7 @@ def main():
                 image_path,
                 output_name=output_name,
                 output_to_file=False,
-                scan_folder=scan_folder_name
+                scan_folder=scan_name
             )
             if device == "cuda":
                 torch.cuda.synchronize()
@@ -102,7 +96,7 @@ def main():
                 output_to_file=True,
                 output_name=output_name,
                 expand_boxes=False,
-                scan_folder=scan_folder_name
+                scan_folder=scan_name
             )
 
             if device == "cuda":
@@ -118,7 +112,7 @@ def main():
                 image_path,
                 output_to_file=True,
                 output_name=output_name,
-                scan_folder=scan_folder_name
+                scan_folder=scan_name
             )
             
             timings["crf"] += time.perf_counter() - t0
@@ -131,7 +125,7 @@ def main():
                 image_rgb,
                 output_name=output_name,
                 output_to_file=False,
-                scan_folder=scan_folder_name
+                scan_folder=scan_name
             )
             timings["gaussian"] += time.perf_counter() - t0
 
@@ -144,7 +138,7 @@ def main():
                 soma_masks,
                 output_to_file=False,
                 output_name=output_name,
-                scan_folder=scan_folder_name
+                scan_folder=scan_name
             )
             timings["skeleton"] += time.perf_counter() - t0
 
@@ -159,7 +153,7 @@ def main():
             timings["dataframe"] += time.perf_counter() - t0
 
             results_df["image_name"] = file_name
-            results_df["scan_folder"] = scan_folder_name
+            results_df["scan_name"] = scan_name
             results_df["global_cell_id"] = (
                 results_df["image_name"]
                 + "_cell_"
@@ -170,7 +164,8 @@ def main():
 
     final_df = pd.concat(all_results, ignore_index=True)
 
-    output_csv = f"morphology/morphology_outputs/{output_name}.csv"
+    csv_stem = f"{output_name}_{scan_name}" if scan_name else output_name
+    output_csv = f"morphology/morphology_outputs/{csv_stem}.csv"
     final_df.to_csv(output_csv, index=False)
 
     # ---------------- Final Timing Summary ----------------
