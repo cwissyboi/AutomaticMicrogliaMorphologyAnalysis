@@ -36,7 +36,7 @@ if [ -z "${SCAN_NAME}" ]; then
     exit 1
 fi
 
-INPUT_PATH="../../ScanData/All_scans_tiled/${SCAN_NAME}"
+INPUT_PATH="../../ScanData\10_patients_GM_tiles/${SCAN_NAME}"
 
 echo "Array task : ${SLURM_ARRAY_TASK_ID}"
 echo "Scan name  : ${SCAN_NAME}"
