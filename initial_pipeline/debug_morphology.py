@@ -47,6 +47,10 @@ from morphology.morphology_features import (
     compute_convex_hull_perimeter,
     compute_branch_mask,
     compute_sholl_analysis,
+    compute_junction_count,
+    compute_end_nodes,
+    compute_start_nodes,
+    compute_skeleton_components,
 )
 from segmentation.custom_segmentation.training.unet import UNet
 from segmentation.custom_segmentation.segmentation_inference import unet_inference
@@ -273,13 +277,17 @@ def panel_skeleton_length(image_bgr, box, mask, skeleton, soma_mask):
 
 
 def panel_junctions(image_bgr, box, mask, skeleton, soma_mask):
+    # Derive junction-pixel mask for visualisation (same kernel as compute_junction_count)
     kernel = np.ones((3, 3), np.uint8); kernel[1, 1] = 0
     nbrs = convolve(skeleton.astype(np.uint8), kernel, mode='constant', cval=0)
     junction_mask = skeleton & (nbrs >= 3)
 
-    # Count connected clusters — same logic as compute_junction_count
+    # Label clusters for drawing centroid dots
     structure = np.ones((3, 3), np.uint8)
-    labeled, num_junctions = scipy_label(junction_mask, structure=structure)
+    labeled, _ = scipy_label(junction_mask, structure=structure)
+
+    # Authoritative count from canonical function
+    num_junctions = compute_junction_count(skeleton)
 
     canvas, origin = _crop_real(image_bgr, box)
     _skeleton_pixels(canvas, skeleton, origin, C_GREEN)
@@ -305,6 +313,7 @@ def panel_junctions(image_bgr, box, mask, skeleton, soma_mask):
 
 
 def panel_nodes(image_bgr, box, mask, skeleton, soma_mask):
+    # Derive tip/soma masks for visualisation
     kernel = np.ones((3, 3), np.uint8); kernel[1, 1] = 0
     nbrs = convolve(skeleton.astype(np.uint8), kernel, mode='constant', cval=0)
     tip_mask   = skeleton & (nbrs == 1)
@@ -313,8 +322,9 @@ def panel_nodes(image_bgr, box, mask, skeleton, soma_mask):
     end_mask   = tip_mask & (~soma_dil)
     start_mask = tip_mask & soma_dil
 
-    n_end   = int(end_mask.sum())
-    n_start = int(start_mask.sum())
+    # Authoritative counts from canonical functions
+    n_end   = compute_end_nodes(skeleton, soma_mask)
+    n_start = compute_start_nodes(skeleton, soma_mask)
     ratio   = n_end / n_start if n_start > 0 else 0.0
 
     canvas, origin = _crop_real(image_bgr, box)
@@ -340,8 +350,12 @@ def panel_nodes(image_bgr, box, mask, skeleton, soma_mask):
 
 
 def panel_components(image_bgr, box, mask, skeleton, soma_mask):
+    # Label for colour-coding the visualisation
     structure = np.ones((3, 3), np.uint8)
-    labeled, n = scipy_label(skeleton, structure=structure)
+    labeled, _ = scipy_label(skeleton, structure=structure)
+
+    # Authoritative count from canonical function
+    n = compute_skeleton_components(skeleton)
 
     cmap = [C_GREEN, C_RED, C_CYAN, C_YELLOW, C_MAGENTA,
             C_ORANGE, C_PINK, C_WHITE, C_BLUE]
@@ -461,30 +475,18 @@ def panel_sholl(image_bgr, box, mask, skeleton, soma_mask):
         cy, cx = float(soma_ys.mean()), float(soma_xs.mean())
 
     skel_ys, skel_xs = np.where(skeleton)
-    distances = (np.sqrt((skel_ys - cy) ** 2 + (skel_xs - cx) ** 2)
-                 if len(skel_ys) > 0 else np.array([]))
 
     canvas, origin = _crop_real(image_bgr, box)
     _tint(canvas, _to_local(soma_bin, origin, canvas.shape), C_BLUE, alpha=0.3)
     _skeleton_pixels(canvas, skeleton, origin, C_GREEN)
 
+    # Draw only the 3 meaningful rings
+    if s_min > 0:
+        _circle(canvas, cy, cx, origin, s_min, C_CYAN,   thickness=1)
+    if s_pr > 0:
+        _circle(canvas, cy, cx, origin, s_pr,  C_YELLOW, thickness=2)
     if s_max > 0:
-        for r in range(1, s_max + 1):
-            if r == s_pr:
-                col, thick = C_YELLOW, 2
-            elif r == s_min:
-                col, thick = C_CYAN, 1
-            elif r == s_max:
-                col, thick = C_ORANGE, 1
-            else:
-                col, thick = (55, 55, 55), 1
-            _circle(canvas, cy, cx, origin, r, col, thick)
-
-    if len(skel_ys) > 0 and s_pr > 0:
-        annulus   = (distances >= s_pr - 0.5) & (distances < s_pr + 0.5)
-        peak_skel = np.zeros_like(skeleton)
-        peak_skel[skel_ys[annulus], skel_xs[annulus]] = True
-        _dots(canvas, peak_skel, origin, C_YELLOW, radius=1)
+        _circle(canvas, cy, cx, origin, s_max, C_ORANGE, thickness=1)
 
     title = "Sholl analysis"
     lines = [

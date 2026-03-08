@@ -474,21 +474,20 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
     
     soma_area = compute_mask_area(soma_mask)
     soma_perimeter = compute_mask_perimeter(soma_mask)
-    soma_circularity = (4 * math.pi * soma_area) / (soma_perimeter ** 2)
-
+    soma_circularity = (4 * math.pi * soma_area) / (soma_perimeter ** 2) if soma_perimeter > 0 else 0.0
 
     cell_area = compute_mask_area(mask)
     cell_perimeter = compute_mask_perimeter(mask)
     cell_convex_hull_area = compute_convex_hull_area(mask)
     cell_convex_hull_perimeter = compute_convex_hull_perimeter(mask)
-    cell_solidity = cell_area / cell_convex_hull_area
-    cell_convexity = cell_convex_hull_perimeter / cell_perimeter
-    cell_circularity = (4 * math.pi * cell_area) / (cell_perimeter ** 2)
+    cell_solidity = cell_area / cell_convex_hull_area if cell_convex_hull_area > 0 else 0.0
+    cell_convexity = cell_convex_hull_perimeter / cell_perimeter if cell_perimeter > 0 else 0.0
+    cell_circularity = (4 * math.pi * cell_area) / (cell_perimeter ** 2) if cell_perimeter > 0 else 0.0
 
     branch_area = compute_branch_area(mask, soma_mask)
     branch_perimeter = compute_branch_perimeter(mask, soma_mask)
 
-    cell_convex_circularity = (4 * math.pi * cell_convex_hull_area) / (cell_convex_hull_perimeter ** 2)
+    cell_convex_circularity = (4 * math.pi * cell_convex_hull_area) / (cell_convex_hull_perimeter ** 2) if cell_convex_hull_perimeter > 0 else 0.0
     end_to_start_ratio = num_end_nodes / num_start_nodes if num_start_nodes > 0 else 0.0
     total_nodes = num_end_nodes + num_start_nodes
 
