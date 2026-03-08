@@ -2,7 +2,7 @@
 #SBATCH --job-name=microglia_pipeline
 #SBATCH --partition=general
 #SBATCH --qos=short
-#SBATCH --time=2:00:00
+#SBATCH --time=0:10:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
@@ -36,7 +36,7 @@ if [ -z "${SCAN_NAME}" ]; then
     exit 1
 fi
 
-INPUT_PATH="../../ScanData\10_patients_GM_tiles/${SCAN_NAME}"
+INPUT_PATH="../../ScanData/10_patients_GM_tiles/${SCAN_NAME}/"
 
 echo "Array task : ${SLURM_ARRAY_TASK_ID}"
 echo "Scan name  : ${SCAN_NAME}"
