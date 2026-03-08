@@ -1,5 +1,8 @@
 import qupath.lib.regions.RegionRequest
 import javax.imageio.ImageIO
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CopyOnWriteArrayList
 
 def imageData = getCurrentImageData()
 def server = imageData.getServer()
@@ -7,6 +10,9 @@ def hierarchy = imageData.getHierarchy()
 
 def tileSize = 512
 def downsample = 1.0
+
+// Number of parallel threads — tune to your machine (4-8 is a good range)
+def numThreads = 4
 
 // --------------------------------------------------
 // Base output directory
@@ -46,18 +52,37 @@ if (grayAnnotations.isEmpty()) {
 }
 
 // --------------------------------------------------
-int tileID = 0
-int checkedTiles = 0
-
+// Build list of all candidate tile positions up-front
+// --------------------------------------------------
+def allPositions = []
 for (int y = 0; y < height; y += tileSize) {
     for (int x = 0; x < width; x += tileSize) {
+        allPositions << [x: x, y: y]
+    }
+}
 
-        checkedTiles++
+print "Total tile positions to check: ${allPositions.size()}"
+
+// --------------------------------------------------
+// Atomic counters (thread-safe)
+// --------------------------------------------------
+def tileCounter   = new AtomicInteger(0)
+def checkedCounter = new AtomicInteger(0)
+
+// --------------------------------------------------
+// Thread pool
+// --------------------------------------------------
+def pool = Executors.newFixedThreadPool(numThreads)
+def futures = new CopyOnWriteArrayList<>()
+
+allPositions.each { pos ->
+    futures << pool.submit({
+        int x = pos.x
+        int y = pos.y
+        checkedCounter.incrementAndGet()
 
         try {
-
-        // ---- Check that ALL four corners are inside gray matter ----
-            // This ensures the entire tile is within gray matter (no white matter included)
+            // ---- Check that ALL four corners are inside gray matter ----
             def corners = [
                 [x,            y           ],
                 [x + tileSize, y           ],
@@ -71,11 +96,10 @@ for (int y = 0; y < height; y += tileSize) {
                 }
             }
 
-            // ---- Skip if any corner is outside gray matter ----
             if (!isFullyGray)
-                continue
+                return
 
-            // ---- Only read image if gray ----
+            // ---- Only read image if fully inside gray matter ----
             def region = RegionRequest.createInstance(
                 server.getPath(),
                 downsample,
@@ -85,29 +109,27 @@ for (int y = 0; y < height; y += tileSize) {
 
             def img = server.readRegion(region)
             if (img == null)
-                continue
+                return
 
+            // tileID is now just x/y based — no shared sequential counter needed for naming
             def outPath = outDir + File.separator +
-                String.format("tile_%05d_x%d_y%d_gray_matter.jpg",
-                              tileID, x, y)
+                String.format("tile_x%d_y%d_gray_matter.jpg", x, y)
 
             ImageIO.write(img, "JPEG", new File(outPath))
-            tileID++
 
-            if (tileID % 100 == 0) {
-                print "Exported ${tileID} gray tiles (checked ${checkedTiles})"
-            }
-
-            Thread.sleep(10)
-
-            if (tileID % 1000 == 0) {
-                System.gc()
+            int exported = tileCounter.incrementAndGet()
+            if (exported % 100 == 0) {
+                print "Exported ${exported} gray tiles (checked ${checkedCounter.get()})"
             }
 
         } catch (Exception e) {
-            print "Skipped tile at x=${x}, y=${y}"
+            print "Skipped tile at x=${x}, y=${y}: ${e.getMessage()}"
         }
-    }
+    } as Runnable)
 }
 
-print "DONE — Exported ${tileID} GRAY MATTER tiles for scan ${imageName}"
+// Wait for all tasks to complete
+pool.shutdown()
+pool.awaitTermination(24, java.util.concurrent.TimeUnit.HOURS)
+
+print "DONE — Exported ${tileCounter.get()} GRAY MATTER tiles for scan ${imageName}"
