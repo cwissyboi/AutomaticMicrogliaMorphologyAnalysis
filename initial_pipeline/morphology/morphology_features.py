@@ -71,7 +71,12 @@ def compute_skeleton_length(skeleton):
 
 def compute_junction_count(skeleton):
     """
-    Count skeleton junction points (pixels with ≥ 3 neighbors).
+    Count the number of distinct junction points in the skeleton.
+
+    A junction pixel is any skeleton pixel with ≥ 3 neighbours.  Adjacent
+    junction pixels form a single physical branching point, so we count
+    connected components of the junction-pixel mask (8-connectivity) rather
+    than individual pixels.
     """
     kernel = np.array([
         [1, 1, 1],
@@ -87,7 +92,11 @@ def compute_junction_count(skeleton):
     )
 
     branch_points = np.logical_and(skeleton, neighbors >= 3)
-    return int(branch_points.sum())
+
+    # Each connected cluster of branch pixels = one junction
+    structure = np.ones((3, 3), dtype=np.uint8)   # 8-connectivity
+    _, num_junctions = label(branch_points, structure=structure)
+    return int(num_junctions)
 
 
 def compute_end_nodes(skeleton, soma_mask):

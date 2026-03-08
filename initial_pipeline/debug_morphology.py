@@ -277,15 +277,29 @@ def panel_junctions(image_bgr, box, mask, skeleton, soma_mask):
     nbrs = convolve(skeleton.astype(np.uint8), kernel, mode='constant', cval=0)
     junction_mask = skeleton & (nbrs >= 3)
 
+    # Count connected clusters — same logic as compute_junction_count
+    structure = np.ones((3, 3), np.uint8)
+    labeled, num_junctions = scipy_label(junction_mask, structure=structure)
+
     canvas, origin = _crop_real(image_bgr, box)
     _skeleton_pixels(canvas, skeleton, origin, C_GREEN)
-    _dots(canvas, junction_mask, origin, C_RED, radius=1)
+    # Draw each junction cluster as a distinct dot at its centroid
+    for j in range(1, num_junctions + 1):
+        ys, xs = np.where(labeled == j)
+        cy_g, cx_g = int(ys.mean()), int(xs.mean())
+        ox, oy = origin
+        cv2.circle(canvas, (cx_g - ox, cy_g - oy), 2, C_RED, -1, cv2.LINE_AA)
 
     title = "Junctions"
-    lines = [f"num_junctions = {int(junction_mask.sum())}"]
+    lines = [
+        f"num_junctions = {num_junctions}",
+        "",
+        "(adjacent junction pixels",
+        " merged into one cluster)",
+    ]
     legend = [
         (C_GREEN, "skeleton"),
-        (C_RED,   "junction pixels (>=3 neighbours)"),
+        (C_RED,   "junction centroid (1 dot = 1 junction)"),
     ]
     return canvas, title, lines, legend
 
