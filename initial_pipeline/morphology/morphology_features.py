@@ -351,6 +351,88 @@ def compute_branch_perimeter(cell_mask, soma_mask):
     return compute_mask_perimeter(branch_mask)
 
 
+def compute_sholl_analysis(skeleton, soma_mask):
+    """
+    Perform Sholl analysis on a process skeleton.
+
+    Concentric rings of integer radius are drawn around the soma centroid.
+    At each radius r the number of skeleton-ring intersections is counted as
+    the number of skeleton pixels that lie within the annulus
+    [r - 0.5, r + 0.5) (Euclidean distance from soma centroid).
+
+    Parameters
+    ----------
+    skeleton : numpy.ndarray
+        2D boolean skeleton (process skeleton, soma region already removed).
+    soma_mask : numpy.ndarray
+        2D binary soma mask (bool or 0/1).
+
+    Returns
+    -------
+    dict with keys:
+        sholl_min_radius  : int   – smallest radius (pixels) with ≥1 intersection
+        sholl_peak_radius : int   – radius with the maximum intersections
+        sholl_max_radius  : int   – largest radius (pixels) with ≥1 intersection
+        sholl_peak        : int   – number of intersections at the peak radius
+        sholl_sum         : int   – total intersections summed across all radii
+
+    If the skeleton is empty the dict contains zeros for all keys.
+    """
+    skeleton = skeleton.astype(bool)
+    soma_bin = soma_mask > 0
+
+    # --- soma centroid (weighted centroid of soma pixels) ---
+    soma_ys, soma_xs = np.where(soma_bin)
+    if len(soma_ys) == 0:
+        # Fall back to skeleton centroid if soma is absent
+        skel_ys, skel_xs = np.where(skeleton)
+        if len(skel_ys) == 0:
+            return dict(sholl_min_radius=0, sholl_peak_radius=0,
+                        sholl_max_radius=0, sholl_peak=0, sholl_sum=0)
+        cy, cx = float(skel_ys.mean()), float(skel_xs.mean())
+    else:
+        cy, cx = float(soma_ys.mean()), float(soma_xs.mean())
+
+    # --- distance map for every skeleton pixel ---
+    skel_ys, skel_xs = np.where(skeleton)
+    if len(skel_ys) == 0:
+        return dict(sholl_min_radius=0, sholl_peak_radius=0,
+                    sholl_max_radius=0, sholl_peak=0, sholl_sum=0)
+
+    distances = np.sqrt((skel_ys - cy) ** 2 + (skel_xs - cx) ** 2)
+
+    # --- sweep radii from 1 to max distance in integer steps ---
+    max_r = int(np.ceil(distances.max()))
+    if max_r < 1:
+        return dict(sholl_min_radius=0, sholl_peak_radius=0,
+                    sholl_max_radius=0, sholl_peak=0, sholl_sum=0)
+
+    intersections = {}
+    for r in range(1, max_r + 1):
+        # pixels within the half-pixel-wide annulus centred at radius r
+        count = int(np.sum((distances >= r - 0.5) & (distances < r + 0.5)))
+        if count > 0:
+            intersections[r] = count
+
+    if not intersections:
+        return dict(sholl_min_radius=0, sholl_peak_radius=0,
+                    sholl_max_radius=0, sholl_peak=0, sholl_sum=0)
+
+    sholl_min_radius  = min(intersections.keys())
+    sholl_max_radius  = max(intersections.keys())
+    sholl_peak_radius = max(intersections, key=intersections.get)
+    sholl_peak        = intersections[sholl_peak_radius]
+    sholl_sum         = sum(intersections.values())
+
+    return dict(
+        sholl_min_radius=sholl_min_radius,
+        sholl_peak_radius=sholl_peak_radius,
+        sholl_max_radius=sholl_max_radius,
+        sholl_peak=sholl_peak,
+        sholl_sum=sholl_sum,
+    )
+
+
 def get_morphological_features(mask, skeleton=None, soma_mask=None):
     """
     mask: boolean or 0/1 numpy array (full cell mask)
@@ -401,6 +483,13 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
     end_to_start_ratio = num_end_nodes / num_start_nodes if num_start_nodes > 0 else 0.0
     total_nodes = num_end_nodes + num_start_nodes
 
+    sholl = compute_sholl_analysis(skeleton, soma_mask)
+    sholl_min_radius  = sholl["sholl_min_radius"]
+    sholl_peak_radius = sholl["sholl_peak_radius"]
+    sholl_max_radius  = sholl["sholl_max_radius"]
+    sholl_peak        = sholl["sholl_peak"]
+    sholl_sum         = sholl["sholl_sum"]
+
     return (
         skeleton_length, 
         num_junctions, 
@@ -422,6 +511,11 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
         cell_convex_circularity,
         branch_area,
         branch_perimeter,
+        sholl_min_radius,
+        sholl_peak_radius,
+        sholl_max_radius,
+        sholl_peak,
+        sholl_sum,
     )
 
 
@@ -474,6 +568,11 @@ def get_morphology_dataframe(
         - cell_convex_circularity
         - branch_area
         - branch_perimeter
+        - sholl_min_radius
+        - sholl_peak_radius
+        - sholl_max_radius
+        - sholl_peak
+        - sholl_sum
     """
 
     records = []
@@ -502,6 +601,11 @@ def get_morphology_dataframe(
             cell_convex_circularity,
             branch_area,
             branch_perimeter,
+            sholl_min_radius,
+            sholl_peak_radius,
+            sholl_max_radius,
+            sholl_peak,
+            sholl_sum,
         ) = get_morphological_features(mask, skeleton, soma_mask)
 
         x_min, y_min, x_max, y_max = box
@@ -529,6 +633,11 @@ def get_morphology_dataframe(
             "cell_convex_circularity": cell_convex_circularity,
             "branch_area": branch_area,
             "branch_perimeter": branch_perimeter,
+            "sholl_min_radius": sholl_min_radius,
+            "sholl_peak_radius": sholl_peak_radius,
+            "sholl_max_radius": sholl_max_radius,
+            "sholl_peak": sholl_peak,
+            "sholl_sum": sholl_sum,
             "xmin": x_min,
             "ymin": y_min,
             "xmax": x_max,
