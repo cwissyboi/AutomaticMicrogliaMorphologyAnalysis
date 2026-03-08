@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from morphology.morphology_features import (
     compute_skeleton_length,
-    compute_branch_count,
+    compute_junction_count,
     compute_skeleton_components,
     compute_mask_area
 )
@@ -112,14 +112,14 @@ def morphology_similarity_score(pred_mask, target_mask, eps=1e-8):
     
     # Extract morphological features
     pred_features = {
-        'num_branches': compute_branch_count(pred_skel),
+        'num_branches': compute_junction_count(pred_skel),
         'num_components': compute_skeleton_components(pred_skel),
         'length_pixels': compute_skeleton_length(pred_skel),
         'cell_area': compute_mask_area(pred_np),
     }
     
     target_features = {
-        'num_branches': compute_branch_count(target_skel),
+        'num_branches': compute_junction_count(target_skel),
         'num_components': compute_skeleton_components(target_skel),
         'length_pixels': compute_skeleton_length(target_skel),
         'cell_area': compute_mask_area(target_np),

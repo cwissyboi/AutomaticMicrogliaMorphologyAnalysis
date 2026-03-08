@@ -11,7 +11,7 @@ Usage:
     
     # Now you can import from initial_pipeline
     from helpers import get_file_name
-    from morphology.morphology_features import compute_branch_count
+    from morphology.morphology_features import compute_junction_count
 """
 
 import sys

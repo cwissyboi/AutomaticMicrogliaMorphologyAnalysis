@@ -64,7 +64,7 @@ def main():
             if not image_path.is_file():
                 continue
 
-            if (counter > 100): 
+            if (counter > 10): 
                 break
 
             counter = counter + 1

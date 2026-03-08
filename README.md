@@ -81,7 +81,7 @@ pip install -r initial_pipeline_requirements.txt
 
 ```bash
 cd initial_pipeline
-python main.py --input_folder_path ../All_scans_tiled_subset --output_name All_scans_tiled_subset
+python main.py --input_folder_path "C:\Users\chris\Desktop\University\Thesis\ScanData\10_patients_GM_tiles" --output_name 10_patients_GM_tiles
 python yolo_inference_only.py --input_folder_path ../../../All_scans_tiled_subset --output_name yolo_for_semi_supervised
 ```
 

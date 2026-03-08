@@ -14,6 +14,8 @@ scp -r uranage1.gif ccharlesworth@login.daic.tudelft.nl:~/
 
 scp -r AnnotationsData_Adjusted_WithSoma ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
+scp 10_patients_GM_tiles.zip ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/ScanData/
+
 scp -r AnnotationsData_Adjusted ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/SegmentationDatasets/
 
 scp -r YOLO_rat_adjusted_2_split ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
@@ -134,4 +136,11 @@ python segmentation_training.py --add_new_components True --disconnect_component
 numpy 1.26.4
 
 
-sacct -u $USER --format=JobID,JobName,Partition,State,Elapsed,Start,End
+sacct -u $USER --format=JobID,JobName%100,Partition,State,Elapsed,Start,End
+
+
+sacct -j 12254770  --format=JobID,JobName,MaxRSS,ReqMem
+
+
+
+sacct -j 12254770 --format=JobID,JobName%100

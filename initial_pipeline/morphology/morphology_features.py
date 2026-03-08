@@ -69,9 +69,9 @@ def compute_skeleton_length(skeleton):
     return int(skeleton.sum())
 
 
-def compute_branch_count(skeleton):
+def compute_junction_count(skeleton):
     """
-    Count skeleton branch points (pixels with ≥ 3 neighbors).
+    Count skeleton junction points (pixels with ≥ 3 neighbors).
     """
     kernel = np.array([
         [1, 1, 1],
@@ -88,6 +88,93 @@ def compute_branch_count(skeleton):
 
     branch_points = np.logical_and(skeleton, neighbors >= 3)
     return int(branch_points.sum())
+
+
+def compute_end_nodes(skeleton, soma_mask):
+    """
+    Count branch tip pixels: skeleton pixels with exactly 1 neighbor that are
+    NOT adjacent to the soma.
+
+    A tip that sits next to the soma boundary is a start node (the point where
+    a branch leaves the cell body), not a free end.  This function excludes
+    those so only true free endings are counted.
+
+    Parameters
+    ----------
+    skeleton : numpy.ndarray
+        2D boolean skeleton (process skeleton, soma region already removed).
+    soma_mask : numpy.ndarray
+        2D binary soma mask (bool or 0/1).
+
+    Returns
+    -------
+    int
+        Number of free branch-tip pixels.
+    """
+    kernel = np.array([
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1]
+    ])
+
+    skeleton = skeleton.astype(bool)
+    soma_bin = soma_mask > 0
+
+    neighbors = convolve(skeleton.astype(np.uint8), kernel, mode="constant", cval=0)
+
+    # Tip pixels: on the skeleton and have exactly 1 neighbor
+    tip_pixels = skeleton & (neighbors == 1)
+
+    # Dilate soma by 1 pixel to catch skeleton pixels that directly border it
+    soma_dilated = convolve(soma_bin.astype(np.uint8), kernel, mode="constant", cval=0) > 0
+
+    # Exclude tips that touch the soma
+    free_tips = tip_pixels & (~soma_dilated)
+
+    return int(free_tips.sum())
+
+
+def compute_start_nodes(skeleton, soma_mask):
+    """
+    Count soma-attachment pixels: skeleton pixels with exactly 1 neighbor that
+    ARE adjacent to the soma.
+
+    These are the points where each branch process departs from the cell body —
+    the opposite of free branch tips.
+
+    Parameters
+    ----------
+    skeleton : numpy.ndarray
+        2D boolean skeleton (process skeleton, soma region already removed).
+    soma_mask : numpy.ndarray
+        2D binary soma mask (bool or 0/1).
+
+    Returns
+    -------
+    int
+        Number of soma-attachment tip pixels.
+    """
+    kernel = np.array([
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1]
+    ])
+
+    skeleton = skeleton.astype(bool)
+    soma_bin = soma_mask > 0
+
+    neighbors = convolve(skeleton.astype(np.uint8), kernel, mode="constant", cval=0)
+
+    # Tip pixels: on the skeleton and have exactly 1 neighbor
+    tip_pixels = skeleton & (neighbors == 1)
+
+    # Dilate soma by 1 pixel to catch skeleton pixels that directly border it
+    soma_dilated = convolve(soma_bin.astype(np.uint8), kernel, mode="constant", cval=0) > 0
+
+    # Keep only tips that touch the soma
+    soma_tips = tip_pixels & soma_dilated
+
+    return int(soma_tips.sum())
 
 
 def compute_skeleton_components(skeleton):
@@ -203,6 +290,67 @@ def compute_convex_hull_perimeter(mask):
 
 
 
+def compute_branch_mask(cell_mask, soma_mask):
+    """
+    Compute the branch mask: pixels that are inside the cell but outside the soma.
+
+    Parameters
+    ----------
+    cell_mask : numpy.ndarray
+        2D binary mask of the full cell (bool or 0/1 or 0/255).
+    soma_mask : numpy.ndarray
+        2D binary mask of the soma (bool or 0/1 or 0/255).
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask where True indicates a branch (process) pixel.
+    """
+    cell_bin = cell_mask > 0
+    soma_bin = soma_mask > 0
+    return cell_bin & (~soma_bin)
+
+
+def compute_branch_area(cell_mask, soma_mask):
+    """
+    Area of the branch region (cell minus soma) in pixels.
+
+    Parameters
+    ----------
+    cell_mask : numpy.ndarray
+        2D binary mask of the full cell (bool or 0/1 or 0/255).
+    soma_mask : numpy.ndarray
+        2D binary mask of the soma (bool or 0/1 or 0/255).
+
+    Returns
+    -------
+    int
+        Number of pixels belonging to branches.
+    """
+    branch_mask = compute_branch_mask(cell_mask, soma_mask)
+    return int(branch_mask.sum())
+
+
+def compute_branch_perimeter(cell_mask, soma_mask):
+    """
+    Perimeter of the branch mask (cell minus soma) in pixels.
+
+    Parameters
+    ----------
+    cell_mask : numpy.ndarray
+        2D binary mask of the full cell (bool or 0/1 or 0/255).
+    soma_mask : numpy.ndarray
+        2D binary mask of the soma (bool or 0/1 or 0/255).
+
+    Returns
+    -------
+    float
+        Total perimeter length (in pixels) of all branch contours.
+    """
+    branch_mask = compute_branch_mask(cell_mask, soma_mask)
+    return compute_mask_perimeter(branch_mask)
+
+
 def get_morphological_features(mask, skeleton=None, soma_mask=None):
     """
     mask: boolean or 0/1 numpy array (full cell mask)
@@ -210,9 +358,10 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
     soma_mask: boolean or 0/1 numpy array (soma region)
 
     returns:
-        length_pixels: int
+        skeleton_length: int
         num_branches: int
         soma_area: int (pixels)
+        num_junctions: int (junction pixels in skeleton)
         num_components: int (disconnected skeleton components)
     """
 
@@ -226,9 +375,11 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
 
 
 
-    length_pixels = compute_skeleton_length(skeleton)
-    num_branches = compute_branch_count(skeleton)
+    skeleton_length = compute_skeleton_length(skeleton)
+    num_junctions = compute_junction_count(skeleton)
     num_components = compute_skeleton_components(skeleton)
+    num_end_nodes = compute_end_nodes(skeleton, soma_mask)
+    num_start_nodes = compute_start_nodes(skeleton, soma_mask)
     
     soma_area = compute_mask_area(soma_mask)
     soma_perimeter = compute_mask_perimeter(soma_mask)
@@ -243,11 +394,21 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
     cell_convexity = cell_convex_hull_perimeter / cell_perimeter
     cell_circularity = (4 * math.pi * cell_area) / (cell_perimeter ** 2)
 
+    branch_area = compute_branch_area(mask, soma_mask)
+    branch_perimeter = compute_branch_perimeter(mask, soma_mask)
+
+    cell_convex_circularity = (4 * math.pi * cell_convex_hull_area) / (cell_convex_hull_perimeter ** 2)
+    end_to_start_ratio = num_end_nodes / num_start_nodes if num_start_nodes > 0 else 0.0
+    total_nodes = num_end_nodes + num_start_nodes
 
     return (
-        length_pixels, 
-        num_branches, 
-        num_components, 
+        skeleton_length, 
+        num_junctions, 
+        num_components,
+        num_end_nodes,
+        num_start_nodes,
+        total_nodes,
+        end_to_start_ratio,
         soma_area, 
         soma_perimeter, 
         soma_circularity, 
@@ -257,7 +418,10 @@ def get_morphological_features(mask, skeleton=None, soma_mask=None):
         cell_convex_hull_perimeter, 
         cell_solidity, 
         cell_convexity, 
-        cell_circularity
+        cell_circularity,
+        cell_convex_circularity,
+        branch_area,
+        branch_perimeter,
     )
 
 
@@ -290,9 +454,13 @@ def get_morphology_dataframe(
         DataFrame with one row per cell and the following columns:
 
         - cell_id
-        - length_pixels
-        - num_branches
+        - skeleton_length
+        - num_junctions
         - num_components
+        - num_end_nodes
+        - num_start_nodes
+        - total_nodes
+        - end_to_start_ratio
         - soma_area
         - soma_perimeter
         - soma_circularity
@@ -303,6 +471,9 @@ def get_morphology_dataframe(
         - cell_solidity
         - cell_convexity
         - cell_circularity
+        - cell_convex_circularity
+        - branch_area
+        - branch_perimeter
     """
 
     records = []
@@ -311,9 +482,13 @@ def get_morphology_dataframe(
         zip(cell_masks, skeletons, soma_masks, boxes)
     ):
         (
-            length_pixels,
-            num_branches,
+            skeleton_length,
+            num_junctions,
             num_components,
+            num_end_nodes,
+            num_start_nodes,
+            total_nodes,
+            end_to_start_ratio,
             soma_area,
             soma_perimeter,
             soma_circularity,
@@ -323,7 +498,10 @@ def get_morphology_dataframe(
             cell_convex_hull_perimeter,
             cell_solidity,
             cell_convexity,
-            cell_circularity
+            cell_circularity,
+            cell_convex_circularity,
+            branch_area,
+            branch_perimeter,
         ) = get_morphological_features(mask, skeleton, soma_mask)
 
         x_min, y_min, x_max, y_max = box
@@ -331,9 +509,13 @@ def get_morphology_dataframe(
 
         record = {
             "cell_id": i,
-            "length_pixels": length_pixels,
-            "num_branches": num_branches,
+            "skeleton_length": skeleton_length,
+            "num_junctions": num_junctions,
             "num_components": num_components,
+            "num_end_nodes": num_end_nodes,
+            "num_start_nodes": num_start_nodes,
+            "total_nodes": total_nodes,
+            "end_to_start_ratio": end_to_start_ratio,
             "soma_area": soma_area,
             "soma_perimeter": soma_perimeter,
             "soma_circularity": soma_circularity,
@@ -344,6 +526,9 @@ def get_morphology_dataframe(
             "cell_solidity": cell_solidity,
             "cell_convexity": cell_convexity,
             "cell_circularity": cell_circularity,
+            "cell_convex_circularity": cell_convex_circularity,
+            "branch_area": branch_area,
+            "branch_perimeter": branch_perimeter,
             "xmin": x_min,
             "ymin": y_min,
             "xmax": x_max,

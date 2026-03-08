@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
 import os
+import sys
 
-# Setup imports from initial_pipeline
-from setup_imports import setup_initial_pipeline_path
-setup_initial_pipeline_path()
+# Ensure initial_pipeline/ is on sys.path regardless of working directory
+_initial_pipeline_path = Path(__file__).resolve().parent.parent.parent
+if str(_initial_pipeline_path) not in sys.path:
+    sys.path.insert(0, str(_initial_pipeline_path))
 
 from helpers import get_file_name, output_masks_to_file_overlay
 
