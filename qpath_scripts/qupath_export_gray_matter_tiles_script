@@ -17,7 +17,7 @@ def numThreads = 4
 // --------------------------------------------------
 // Base output directory
 // --------------------------------------------------
-def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled_whole_box_in_GM"
+def baseOutDir = "C:\\Users\\chris\\Desktop\\University\\Thesis\\All_scans_tiled_whole_box_in_GM_parallel"
 mkdirs(baseOutDir)
 
 // --------------------------------------------------

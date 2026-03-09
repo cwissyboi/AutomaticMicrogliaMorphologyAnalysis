@@ -81,7 +81,8 @@ pip install -r initial_pipeline_requirements.txt
 
 ```bash
 cd initial_pipeline
-python main.py --input_folder_path "../../ScanData/slide_001_tiles" --output_name experiment_001 --scan_name slide_001
+python main.py --input_folder_path "../../ScanData/10_patients_GM_tiles/2014-048_Iba1_Temporal_pole_Batch_8/" --output_name "10 patients" --scan_name "2014-048_Iba1_Temporal_pole_Batch_8"
+
 python debug_morphology.py --input_folder_path "C:\Users\chris\Desktop\University\Thesis\ScanData\10_patients_GM_tiles" --max_cells 30
 python yolo_inference_only.py --input_folder_path ../../../All_scans_tiled_subset --output_name yolo_for_semi_supervised
 ```
