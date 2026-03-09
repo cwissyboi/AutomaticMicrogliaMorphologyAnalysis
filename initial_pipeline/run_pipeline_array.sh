@@ -48,7 +48,7 @@ echo "Start time : $(date)"
 
 srun python -u main.py \
     --input_folder_path "${INPUT_PATH}" \
-    --output_name pipeline_run \
+    --output_name all_scans_run \
     --scan_name "${SCAN_NAME}"
 
 echo "Finished    : $(date)"
