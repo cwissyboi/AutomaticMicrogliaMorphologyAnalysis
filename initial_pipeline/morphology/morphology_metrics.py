@@ -171,6 +171,54 @@ def per_feature_similarity(pred_features: pd.Series, target_features: pd.Series,
     return similarities
 
 
+def per_feature_morphology_score(pred_features: pd.Series, target_features: pd.Series,
+                                  weights: Optional[Union[Dict[str, float], None]] = None,
+                                  normalize: bool = True,
+                                  epsilon: float = 1e-8) -> Dict[str, Dict[str, float]]:
+    """Compute a detailed per-feature breakdown of the morphology score.
+
+    For every feature this returns the symmetric relative error, the similarity
+    (i.e. ``1 - error`` style score in [0, 1]), the SHAP weight, and the
+    weighted contribution to the final score.
+
+    Args:
+        pred_features: Predicted morphological features (pandas Series).
+        target_features: Target morphological features (pandas Series).
+        weights: Feature weights as a dict mapping feature name → weight.
+                 If None, SHAP weights are loaded from the default CSV path.
+        normalize: Whether to normalise features before comparison.
+        epsilon: Small constant to avoid division by zero.
+
+    Returns:
+        Dictionary mapping each feature name to a dict with keys:
+            ``error``        – symmetric relative error in [0, 1]
+            ``similarity``   – feature similarity score in (0, 1]  (% performance)
+            ``weight``       – SHAP importance weight
+            ``contribution`` – weight × similarity  (un-normalised contribution)
+    """
+    if weights is None:
+        weights = load_shap_weights()
+
+    similarities = per_feature_similarity(pred_features, target_features, normalize, epsilon)
+
+    total_weight = sum(weights.get(f, 0.0) for f in similarities)
+
+    result: Dict[str, Dict[str, float]] = {}
+    for feature, similarity in similarities.items():
+        weight = weights.get(feature, 0.0)
+        error = symmetric_relative_error(
+            pred_features[feature], target_features[feature], epsilon
+        )
+        result[feature] = {
+            "error": error,
+            "similarity": similarity,
+            "weight": weight,
+            "contribution": weight * similarity,
+        }
+
+    return result
+
+
 def weighted_morphology_score(pred_features: pd.Series, target_features: pd.Series,
                                weights: Optional[Union[Dict[str, float], None]] = None,
                                normalize: bool = True,

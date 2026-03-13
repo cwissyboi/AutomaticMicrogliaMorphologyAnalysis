@@ -31,10 +31,11 @@ from training.evaluation import (
     print_metrics_summary,
     dice_score,
     iou_score,
-    morphology_similarity_score
+    morphology_similarity_score,
+    morphology_similarity_score_detailed
 )
 from crf import connect_components_adaptive, connect_components_probability_based
-from training.printing_utils import print_all_cross_validation_results
+from training.printing_utils import print_all_cross_validation_results, print_morphology_feature_summary
 
 # Setup imports from initial_pipeline (for morphology features)
 from setup_imports import setup_initial_pipeline_path
@@ -426,6 +427,59 @@ def evaluate_test_with_regions(model, test_df, device, training_data_dir, img_si
 
 # Visualize predictions
 
+@torch.no_grad()
+def evaluate_morphology_breakdown(model, loader, device):
+    """Run a morphology-only evaluation pass that collects per-cell feature breakdowns.
+
+    This is called once at the very end of training (after all folds) to produce
+    the detailed morphology feature summary.  It does NOT affect any training logic.
+
+    Args:
+        model: The trained segmentation model (should already have best weights loaded).
+        loader: DataLoader for the test set.  Expected to yield 3-tuples
+                (image, mask, soma_mask) as produced when ``include_soma=True``.
+        device: Torch device.
+
+    Returns:
+        List of per-cell breakdown dicts (one per cell in the loader), each as
+        returned by ``morphology_similarity_score_detailed``.
+    """
+    model.eval()
+    cell_breakdowns = []
+
+    for batch in loader:
+        if len(batch) == 3:
+            x, y, soma_batch = batch
+        else:
+            x, y = batch
+            soma_batch = None
+
+        x, y = x.to(device), y.to(device)
+        logits = model(x)
+        probs  = torch.sigmoid(logits)
+
+        for i in range(probs.shape[0]):
+            pred   = probs[i, 0]
+            target = y[i, 0]
+            img_np = (x[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+            soma_mask_i = None
+            if soma_batch is not None:
+                s = soma_batch[i]
+                if s is not None:
+                    soma_mask_i = s[0] if s.dim() == 3 else s
+
+            _, breakdown = morphology_similarity_score_detailed(
+                pred, target,
+                soma_mask=soma_mask_i,
+                image_rgb=img_np,
+            )
+            if breakdown:
+                cell_breakdowns.append(breakdown)
+
+    return cell_breakdowns
+
+
 def main():
     args = parse_segmentation_args()
 
@@ -476,6 +530,7 @@ def main():
     all_fold_postprocessed_region_metrics = []
     all_fold_postprocessed_probability_metrics = []
     all_fold_postprocessed_probability_region_metrics = []
+    all_fold_morphology_breakdowns = []  # per-fold list of per-cell feature breakdowns
 
     train_tfms = A.Compose([
         A.Resize(256, 256),
@@ -609,6 +664,13 @@ def main():
         # Final test evaluation - NOW calculate morphology metric
         final_test_metrics = evaluate(model, test_loader, device, calculate_morphology_metric=True)
         all_fold_metrics.append(final_test_metrics)
+
+        # Collect per-feature morphology breakdown for the post-training summary
+        try:
+            fold_breakdowns = evaluate_morphology_breakdown(model, test_loader, device)
+            all_fold_morphology_breakdowns.append(fold_breakdowns)
+        except Exception as e:
+            print(f"\n!!! WARNING: Could not collect morphology feature breakdown for fold {fold + 1}: {e}")
 
 
         print(
@@ -763,6 +825,13 @@ def main():
         all_fold_postprocessed_probability_metrics=all_fold_postprocessed_probability_metrics,
         all_fold_postprocessed_probability_region_metrics=all_fold_postprocessed_probability_region_metrics
     )
+
+    # Print morphology feature summary: per-feature % performance, weight, and contribution
+    if all_fold_morphology_breakdowns:
+        print_morphology_feature_summary(
+            all_fold_feature_breakdowns=all_fold_morphology_breakdowns,
+            label="NO POSTPROCESSING",
+        )
 
 
 
