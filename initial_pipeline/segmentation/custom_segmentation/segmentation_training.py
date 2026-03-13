@@ -669,6 +669,11 @@ def main():
         try:
             fold_breakdowns = evaluate_morphology_breakdown(model, test_loader, device)
             all_fold_morphology_breakdowns.append(fold_breakdowns)
+            # Print per-fold summary immediately so you can inspect it during training
+            print_morphology_feature_summary(
+                all_fold_feature_breakdowns=[fold_breakdowns],
+                label=f"FOLD {fold + 1}",
+            )
         except Exception as e:
             print(f"\n!!! WARNING: Could not collect morphology feature breakdown for fold {fold + 1}: {e}")
 
@@ -830,7 +835,7 @@ def main():
     if all_fold_morphology_breakdowns:
         print_morphology_feature_summary(
             all_fold_feature_breakdowns=all_fold_morphology_breakdowns,
-            label="NO POSTPROCESSING",
+            label="ALL FOLDS (CROSS-VALIDATION AVERAGE)",
         )
 
 
