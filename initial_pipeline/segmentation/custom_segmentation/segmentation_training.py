@@ -459,7 +459,7 @@ def main():
     )
 
     # Only take first 160 for now to train fast
-    path_df = path_df.head(40)
+    # path_df = path_df.head(256)
     print(len(path_df), "annotation pairs found")
     soma_count = path_df['soma_mask_path'].notna().sum()
     print(f"  ({soma_count}/{len(path_df)} have paired soma masks)")
@@ -548,8 +548,8 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 1
-        patience = 1
+        max_epochs = 100
+        patience = 10
 
         best_dice = -float("inf")
         best_epoch = -1
