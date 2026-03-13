@@ -726,6 +726,17 @@ def main():
             trainval_df, test_size=0.1, random_state=42, shuffle=True
         )
 
+        # Optionally restrict labelled training data to a subset.
+        # Val and test sets are always kept at full size.
+        if args.labelled_fraction < 1.0:
+            n_full  = len(train_df)
+            n_keep  = max(1, int(round(n_full * args.labelled_fraction)))
+            train_df = train_df.sample(n=n_keep, random_state=42).reset_index(drop=True)
+            print(
+                f"  [labelled_fraction={args.labelled_fraction}] "
+                f"Using {n_keep}/{n_full} labelled training samples."
+            )
+
         print(
             f"Sizes | Train: {len(train_df)}, "
             f"Val: {len(val_df)}, Test: {len(test_df)}"

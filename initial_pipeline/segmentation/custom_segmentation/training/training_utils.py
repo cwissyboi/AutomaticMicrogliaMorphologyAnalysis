@@ -245,4 +245,13 @@ def parse_mean_teacher_args():
                              "Crops below the threshold are skipped. "
                              "Mutually exclusive with the default soft MSE consistency.")
 
+    # ---- Labelled data fraction (for semi-supervised ablation) --------------
+    parser.add_argument("--labelled_fraction", type=float, default=1.0,
+                        help="Fraction of the labelled training set to use (0.0, 1.0]. "
+                             "The subset is drawn with a fixed random seed so results "
+                             "are reproducible. The val and test sets are always kept "
+                             "at full size. Use this to study how performance scales "
+                             "with the amount of labelled data, e.g. 0.1, 0.25, 0.5, "
+                             "0.75, 1.0.")
+
     return parser.parse_args()

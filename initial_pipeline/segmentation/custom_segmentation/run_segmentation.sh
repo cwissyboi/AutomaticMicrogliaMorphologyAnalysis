@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=general
+#SBATCH --partition=influence,ewi-insy,general
 #SBATCH --qos=short
 #SBATCH --time=1:45:00
 #SBATCH --ntasks=1
