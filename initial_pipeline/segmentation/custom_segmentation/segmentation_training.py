@@ -41,6 +41,30 @@ from setup_imports import setup_initial_pipeline_path
 setup_initial_pipeline_path()
 
 
+def soma_collate_fn(batch):
+    """Custom collate for SegmentationDataset with include_soma=True.
+
+    Each item is a 3-tuple (image, mask, soma_tensor) where soma_tensor may
+    be None for cells that have no paired soma mask.  PyTorch's default collate
+    cannot stack a mix of tensors and None, so we handle the third element
+    manually: tensors are stacked into a batch tensor; Nones are left as a
+    plain Python list so the training/evaluation loop can detect them.
+    """
+    from torch.utils.data.dataloader import default_collate
+
+    if len(batch[0]) == 3:
+        images  = default_collate([item[0] for item in batch])
+        masks   = default_collate([item[1] for item in batch])
+        # soma tensors: stack if all present, else keep as list
+        soma_items = [item[2] for item in batch]
+        if all(s is not None for s in soma_items):
+            somas = default_collate(soma_items)
+        else:
+            somas = soma_items  # list of (tensor | None)
+        return images, masks, somas
+    else:
+        return default_collate(batch)
+
 
 class CombinedLoss(nn.Module):
     """
@@ -165,7 +189,12 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
     
     Args:
         model: The segmentation model
-        loader: DataLoader for the dataset
+        loader: DataLoader for the dataset.  Each batch may be either:
+                  - (image, mask)                  – standard 2-tuple
+                  - (image, mask, soma_mask)        – 3-tuple with soma masks
+                When calculate_morphology_metric=True a 3-tuple loader is expected
+                so that the ground-truth soma can be passed to morphology_similarity_score
+                and the predicted soma can be derived via the Gaussian filter from the image.
         device: Device to run evaluation on
         calculate_morphology_metric: If True, compute morphology similarity score.
                                      Default False since it's computationally expensive.
@@ -185,7 +214,14 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
     dice_list, iou_list = [], []
     morphology_list = [] if calculate_morphology_metric else None
 
-    for x, y in loader:
+    for batch in loader:
+        # Auto-detect whether the loader yields soma masks as a 3rd element
+        if len(batch) == 3:
+            x, y, soma_batch = batch
+        else:
+            x, y = batch
+            soma_batch = None
+
         x, y = x.to(device), y.to(device)
         logits = model(x)
         probs = torch.sigmoid(logits)
@@ -196,12 +232,12 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
         for i in range(batch_size):
             pred = probs[i, 0]  # [H, W]
             target = y[i, 0]    # [H, W]
+
+            # Always extract the image as uint8 numpy (needed for Gaussian soma)
+            img_np = (x[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             
             # Apply postprocessing if requested
             if apply_postprocessing:
-                # Convert to numpy
-                img_np = (x[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-                
                 if postprocessing_type == 'adaptive':
                     # Traditional: color/texture based
                     pred_np = (pred > 0.5).cpu().numpy().astype(np.uint8)
@@ -231,7 +267,18 @@ def evaluate(model, loader, device, calculate_morphology_metric=False, apply_pos
             
             # Morphology-level metric (only if requested)
             if calculate_morphology_metric:
-                morph_score = morphology_similarity_score(pred, target)
+                # Extract per-sample soma mask (may be None if unavailable)
+                soma_mask_i = None
+                if soma_batch is not None:
+                    s = soma_batch[i]
+                    if s is not None:
+                        # soma_batch items are (1, H, W) tensors or None
+                        soma_mask_i = s[0] if s.dim() == 3 else s
+                morph_score = morphology_similarity_score(
+                    pred, target,
+                    soma_mask=soma_mask_i,
+                    image_rgb=img_np,
+                )
                 morphology_list.append(morph_score)
 
     results = {
@@ -400,9 +447,22 @@ def main():
     # Only segment the entire cell ie. not just the SOMA
     path_df = path_df[path_df['class'] == 'MG_whole']
 
+    # Merge soma_mask_path so that val/test datasets can load GT soma masks
+    # for morphology metric evaluation.
+    paired_df = pair_whole_and_soma_masks(SEGMENTATIONS_DIR, mask_name='masks')
+    # paired_df uses 'whole_mask_path' for the cell mask; path_df uses 'mask_path'.
+    # They refer to the same file, so join on image_path.
+    path_df = path_df.merge(
+        paired_df[['image_path', 'soma_mask_path']],
+        on='image_path',
+        how='left'
+    )
+
     # Only take first 160 for now to train fast
-    # path_df = path_df.head(40)
+    path_df = path_df.head(40)
     print(len(path_df), "annotation pairs found")
+    soma_count = path_df['soma_mask_path'].notna().sum()
+    print(f"  ({soma_count}/{len(path_df)} have paired soma masks)")
 
     k_folds = 5
     kf = KFold(
@@ -460,19 +520,21 @@ def main():
         val_ds = SegmentationDataset(
             val_df, test_tfms,
             disconnect_components=False,
-            add_new_components=False
+            add_new_components=False,
+            include_soma=True,
         )
 
         test_ds = SegmentationDataset(
             test_df, test_tfms,
             disconnect_components=False,
-            add_new_components=False
+            add_new_components=False,
+            include_soma=True,
         )
 
         batch_size = 16
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-        val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
-        test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
+        val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, collate_fn=soma_collate_fn)
+        test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, collate_fn=soma_collate_fn)
 
         # Setup loss function based on arguments
         criterion = CombinedLoss(loss_type=args.loss_type, alpha=args.cldice_alpha)
@@ -486,8 +548,8 @@ def main():
         model = UNet().to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         
-        max_epochs = 100
-        patience = 10
+        max_epochs = 1
+        patience = 1
 
         best_dice = -float("inf")
         best_epoch = -1

@@ -7,20 +7,17 @@ separate metrics for different anatomical regions (soma vs branches).
 
 import torch
 import numpy as np
+import pandas as pd
 from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
-from skimage.morphology import skeletonize
 import sys
 from pathlib import Path
 
 # Setup imports from initial_pipeline for morphology features
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from morphology.morphology_features import (
-    compute_skeleton_length,
-    compute_junction_count,
-    compute_skeleton_components,
-    compute_mask_area
-)
+from morphology.morphology_features import get_morphological_features
+from morphology.morphology_metrics import weighted_morphology_score, ALL_FEATURE_COLUMNS
+from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_soma_masks
 
 
 @dataclass
@@ -83,77 +80,76 @@ def iou_score(pred, target, eps=1e-6):
     return (inter + eps) / (union + eps)
 
 
-def morphology_similarity_score(pred_mask, target_mask, eps=1e-8):
+def morphology_similarity_score(pred_mask, target_mask, soma_mask=None, image_rgb=None, eps=1e-8):
     """
-    Compute morphological feature similarity between predicted and target masks.
-    
-    This compares key morphological features:
-    - num_branches: critical for microglia phenotype
-    - num_components: detects fragmentation
-    - length_pixels: overall skeleton length
-    - cell_area: overall cell size
-    
-    Returns a score in [0, 1] where 1 is perfect similarity.
+    Compute morphological feature similarity between predicted and target masks
+    using all 25 morphological features weighted by SHAP importance scores.
+
+    For the predicted mask, if ``image_rgb`` is provided the Gaussian filter
+    soma detector (same as the main inference pipeline) is run on the image crop
+    to obtain a predicted soma mask.  This means soma-related features are
+    computed independently for pred and target rather than sharing the same GT
+    soma, giving a fairer assessment of segmentation quality.
+
+    For the target mask, ``soma_mask`` (the ground-truth soma) is used directly.
+
+    Args:
+        pred_mask   : Predicted whole-cell mask tensor [H, W], probabilities or binary.
+        target_mask : Ground-truth whole-cell mask tensor [H, W].
+        soma_mask   : Ground-truth soma mask tensor [H, W], or None.
+        image_rgb   : Original RGB image as a uint8 numpy array [H, W, 3].
+                      When provided, the Gaussian filter is applied to derive
+                      a predicted soma mask.  When None, no soma mask is used
+                      for the prediction.
+        eps         : Small epsilon (unused directly, kept for API compatibility).
+
+    Returns:
+        Morphology similarity score in [0, 1] where 1 is perfect.
     """
-    # Convert to numpy and binary
-    pred_np = (pred_mask > 0.5).cpu().numpy().astype(bool)
-    target_np = (target_mask > 0.5).cpu().numpy().astype(bool)
-    
-    # Check if masks are empty
+    # ---- Convert tensors to binary numpy arrays ----------------------------
+    pred_np   = (pred_mask   > 0.5).cpu().numpy().astype(np.uint8)
+    target_np = (target_mask > 0.5).cpu().numpy().astype(np.uint8)
+
     if not pred_np.any() or not target_np.any():
         return 0.0
-    
-    # Compute skeletons
+
+    # ---- Derive predicted soma via Gaussian filter -------------------------
+    pred_soma_np = None
+    if image_rgb is not None:
+        try:
+            H, W = image_rgb.shape[:2]
+            # Treat the whole crop as the ROI: bounding box = full image corners
+            box = np.array([[0, 0, W, H]], dtype=np.float32)
+            soma_masks_list = get_gaussian_filter_soma_masks(
+                boxes=box,
+                image_path=None,          # not needed when output_to_file=False
+                image_rgb=image_rgb,
+                output_name=None,
+                scan_folder=None,
+                output_to_file=False,
+            )
+            if soma_masks_list:
+                pred_soma_np = (soma_masks_list[0] > 0).astype(np.uint8)
+        except Exception:
+            pred_soma_np = None  # fall back to no soma for pred
+
+    # ---- Ground-truth soma -------------------------------------------------
+    target_soma_np = None
+    if soma_mask is not None:
+        target_soma_np = (soma_mask > 0.5).cpu().numpy().astype(np.uint8)
+
+    # ---- Compute all 25 morphological features for pred and target ---------
     try:
-        pred_skel = skeletonize(pred_np)
-        target_skel = skeletonize(target_np)
-    except:
+        pred_tuple   = get_morphological_features(pred_np,   soma_mask=pred_soma_np)
+        target_tuple = get_morphological_features(target_np, soma_mask=target_soma_np)
+    except Exception:
         return 0.0
-    
-    # Extract morphological features
-    pred_features = {
-        'num_branches': compute_junction_count(pred_skel),
-        'num_components': compute_skeleton_components(pred_skel),
-        'length_pixels': compute_skeleton_length(pred_skel),
-        'cell_area': compute_mask_area(pred_np),
-    }
-    
-    target_features = {
-        'num_branches': compute_junction_count(target_skel),
-        'num_components': compute_skeleton_components(target_skel),
-        'length_pixels': compute_skeleton_length(target_skel),
-        'cell_area': compute_mask_area(target_np),
-    }
-    
-    # Compute normalized similarity for each feature
-    # Using symmetric relative error: |pred - target| / (pred + target)
-    similarities = []
-    weights = {
-        'num_branches': 2.0,      # Most important for phenotype
-        'num_components': 1.5,    # Important for detecting fragmentation
-        'length_pixels': 1.0,     # Standard weight
-        'cell_area': 1.0,         # Standard weight
-    }
-    
-    for feature_name in pred_features.keys():
-        pred_val = pred_features[feature_name]
-        target_val = target_features[feature_name]
-        weight = weights[feature_name]
-        
-        # Symmetric relative error
-        if pred_val + target_val > 0:
-            rel_error = abs(pred_val - target_val) / (pred_val + target_val + eps)
-            similarity = 1.0 / (1.0 + rel_error)  # Convert to similarity [0, 1]
-        else:
-            similarity = 1.0  # Both are 0
-        
-        similarities.append(weight * similarity)
-    
-    # Weighted average
-    total_weight = sum(weights.values())
-    morphology_score = sum(similarities) / total_weight
-    
-    return morphology_score
+
+    pred_feats   = pd.Series(dict(zip(ALL_FEATURE_COLUMNS, pred_tuple)))
+    target_feats = pd.Series(dict(zip(ALL_FEATURE_COLUMNS, target_tuple)))
+
+    # ---- SHAP-weighted similarity across all 25 features -------------------
+    return weighted_morphology_score(pred_feats, target_feats)
 
 
 def compute_binary_metrics(pred: torch.Tensor, target: torch.Tensor, 
