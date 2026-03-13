@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
-#SBATCH --output=run_segmentation_mean_teacher_joint_pseudo_label_frac100.out
-#SBATCH --error=run_segmentation_mean_teacher_joint_pseudo_label_frac100.err
+#SBATCH --output=run_segmentation_mean_teacher_joint_pseudo_label_frac10_w0.out
+#SBATCH --error=run_segmentation_mean_teacher_joint_pseudo_label_frac10_w0.err
 #SBATCH --mail-type=END
 
 module use /opt/insy/modulefiles
@@ -16,19 +16,19 @@ module load cuda/12.1
 source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
-# Labelled-fraction ablation: 100% of labelled training data (full dataset).
-# This is the baseline for the ablation series and is functionally identical
-# to old_runs/run_segmentation_mean_teacher_joint_pseudo_label.sh — kept here
-# so all fraction variants live side-by-side for easy comparison.
+# Labelled-fraction ablation: 10% of labelled training data.
+# All other settings match run_segmentation_mean_teacher_joint_pseudo_label.sh
+# (old_runs/). Use this together with the 25/50/75/100 variants to assess
+# whether Mean Teacher provides benefit at low labelled-data regimes.
 
-echo "Starting Mean Teacher training (joint + pseudo-labels, 100% labelled data)"
+echo "Starting Mean Teacher training (joint + pseudo-labels, 10% labelled data)"
 
 srun python mean_teacher_training.py \
     --unlabelled_dir "../../../../SegmentationDatasets/UnlabelledCells/" \
     --loss_type bce_cldice \
     --cldice_alpha 0.5 \
     --ema_alpha 0.999 \
-    --consistency_weight 5.0 \
+    --consistency_weight 0 \
     --consistency_rampup 20 \
     --unlabelled_batch_size 16 \
     --joint_training \
@@ -36,4 +36,4 @@ srun python mean_teacher_training.py \
     --finetune_patience 30 \
     --finetune_lr 1e-4 \
     --pseudo_label_threshold 0.8 \
-    --labelled_fraction 1.0
+    --labelled_fraction 0.1
