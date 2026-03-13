@@ -169,7 +169,7 @@ def morphology_similarity_score_detailed(pred_mask, target_mask, soma_mask=None,
         Tuple of:
             score       – scalar morphology similarity in [0, 1]
             breakdown   – dict mapping feature name → dict with keys
-                          ``error``, ``similarity``, ``weight``, ``contribution``
+                          ``error``, ``performance``, ``weight``, ``contribution``
                           Returns an empty dict on failure.
     """
     pred_np   = (pred_mask   > 0.5).cpu().numpy().astype(np.uint8)
