@@ -11,7 +11,7 @@ SHAP-derived importance weights for all 25 morphological features.
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Union
+from typing import Dict, Optional, Union
 
 
 # ---------------------------------------------------------------------------
@@ -82,48 +82,10 @@ def load_shap_weights(csv_path: Union[str, Path, None] = None) -> Dict[str, floa
     return dict(zip(df['feature'], df['weight']))
 
 
-def normalize_features(pred_features: pd.Series, target_features: pd.Series,
-                       feature_ranges: Optional[Dict[str, Tuple[float, float]]] = None
-                       ) -> Tuple[pd.Series, pd.Series]:
-    """Normalize features to [0, 1] range for fair comparison.
-
-    Args:
-        pred_features: Predicted morphological features
-        target_features: Target morphological features
-        feature_ranges: Optional dict of (min, max) for each feature.
-                       If None, uses min/max from pred and target.
-
-    Returns:
-        Normalized (pred_features, target_features)
-    """
-    if feature_ranges is None:
-        feature_ranges = {}
-        for feature in pred_features.index:
-            min_val = min(pred_features[feature], target_features[feature])
-            max_val = max(pred_features[feature], target_features[feature])
-            feature_ranges[feature] = (min_val, max_val)
-
-    pred_norm = pred_features.copy()
-    target_norm = target_features.copy()
-
-    for feature, (min_val, max_val) in feature_ranges.items():
-        if feature not in pred_features.index:
-            continue
-
-        if max_val - min_val > 1e-8:
-            pred_norm[feature] = (pred_features[feature] - min_val) / (max_val - min_val)
-            target_norm[feature] = (target_features[feature] - min_val) / (max_val - min_val)
-        else:
-            pred_norm[feature] = 0.0
-            target_norm[feature] = 0.0
-
-    return pred_norm, target_norm
-
-
 def symmetric_relative_error(pred: float, target: float, epsilon: float = 1e-8) -> float:
-    """Compute symmetric relative error: |pred - target| / (pred + target + epsilon).
+    """Compute symmetric relative error: |pred - target| / (|pred| + |target| + epsilon).
 
-    More balanced than one-sided relative error when pred can be larger than target.
+    Returns a value in [0, 1] where 0 means perfect agreement.
 
     Args:
         pred: Predicted value
@@ -136,84 +98,46 @@ def symmetric_relative_error(pred: float, target: float, epsilon: float = 1e-8) 
     return abs(pred - target) / (abs(pred) + abs(target) + epsilon)
 
 
-def _feature_similarity(pred: float, target: float, epsilon: float = 1e-8) -> float:
-    """Convert symmetric relative error to a similarity score in [0, 1]."""
-    error = symmetric_relative_error(pred, target, epsilon)
-    return 1.0 / (1.0 + error)
-
-
-def per_feature_similarity(pred_features: pd.Series, target_features: pd.Series,
-                            normalize: bool = True,
-                            epsilon: float = 1e-8) -> Dict[str, float]:
-    """Compute similarity scores for each morphological feature independently.
-
-    Args:
-        pred_features: Predicted morphological features (pandas Series)
-        target_features: Target morphological features (pandas Series)
-        normalize: Whether to normalize features before comparison
-        epsilon: Small constant to avoid division by zero
-
-    Returns:
-        Dictionary mapping feature name to similarity score [0, 1]
-    """
-    if normalize:
-        pred_norm, target_norm = normalize_features(pred_features, target_features)
-    else:
-        pred_norm, target_norm = pred_features, target_features
-
-    similarities = {}
-    for feature in pred_norm.index:
-        if feature in target_norm.index:
-            similarities[feature] = _feature_similarity(
-                pred_norm[feature], target_norm[feature], epsilon
-            )
-
-    return similarities
-
-
 def per_feature_morphology_score(pred_features: pd.Series, target_features: pd.Series,
                                   weights: Optional[Union[Dict[str, float], None]] = None,
-                                  normalize: bool = True,
                                   epsilon: float = 1e-8) -> Dict[str, Dict[str, float]]:
     """Compute a detailed per-feature breakdown of the morphology score.
 
-    For every feature this returns the symmetric relative error, the similarity
-    (i.e. ``1 - error`` style score in [0, 1]), the SHAP weight, and the
-    weighted contribution to the final score.
+    Performance for each feature is defined as ``1 - symmetric_relative_error``
+    on the raw feature values, giving an intuitive accuracy in [0, 1] where
+    1.0 = perfect match and 0.0 = maximally wrong.
 
     Args:
         pred_features: Predicted morphological features (pandas Series).
         target_features: Target morphological features (pandas Series).
         weights: Feature weights as a dict mapping feature name → weight.
                  If None, SHAP weights are loaded from the default CSV path.
-        normalize: Whether to normalise features before comparison.
         epsilon: Small constant to avoid division by zero.
 
     Returns:
         Dictionary mapping each feature name to a dict with keys:
-            ``error``        – symmetric relative error in [0, 1]
-            ``similarity``   – feature similarity score in (0, 1]  (% performance)
+            ``error``        – symmetric relative error in [0, 1]  (0 = perfect)
+            ``performance``  – 1 - error, i.e. % accuracy in [0, 1]  (1 = perfect)
             ``weight``       – SHAP importance weight
-            ``contribution`` – weight × similarity  (un-normalised contribution)
+            ``contribution`` – weight × performance (un-normalised contribution)
     """
     if weights is None:
         weights = load_shap_weights()
 
-    similarities = per_feature_similarity(pred_features, target_features, normalize, epsilon)
-
-    total_weight = sum(weights.get(f, 0.0) for f in similarities)
-
     result: Dict[str, Dict[str, float]] = {}
-    for feature, similarity in similarities.items():
-        weight = weights.get(feature, 0.0)
+    for feature in pred_features.index:
+        if feature not in target_features.index:
+            continue
         error = symmetric_relative_error(
             pred_features[feature], target_features[feature], epsilon
         )
+        performance = 1.0 - error
+        weight = weights.get(feature, 0.0)
         result[feature] = {
             "error": error,
-            "similarity": similarity,
+            "performance": performance,
             "weight": weight,
-            "contribution": weight * similarity,
+            "contribution": weight * performance,
         }
 
     return result
@@ -221,38 +145,30 @@ def per_feature_morphology_score(pred_features: pd.Series, target_features: pd.S
 
 def weighted_morphology_score(pred_features: pd.Series, target_features: pd.Series,
                                weights: Optional[Union[Dict[str, float], None]] = None,
-                               normalize: bool = True,
                                epsilon: float = 1e-8) -> float:
-    """Compute weighted average of morphological feature similarities.
+    """Compute weighted average morphology score as a weighted mean of per-feature accuracy.
 
-    This is the main metric for overall morphological similarity.  When no
-    weights are provided the SHAP-derived weights are loaded automatically
-    from ``analysis/shap_feature_weights.csv``.
+    Each feature's accuracy is ``1 - symmetric_relative_error(pred, target)``.
+    The final score is the SHAP-weighted average of those per-feature accuracies.
 
     Args:
         pred_features: Predicted morphological features
         target_features: Target morphological features
         weights: Feature weights as a dict mapping feature name → weight.
                  If None, SHAP weights are loaded from the default CSV path.
-        normalize: Whether to normalize features before comparison
         epsilon: Small constant to avoid division by zero
 
     Returns:
         Weighted morphology score in [0, 1], where 1 is perfect
     """
-    if weights is None:
-        weights = load_shap_weights()
-
-    similarities = per_feature_similarity(pred_features, target_features, normalize, epsilon)
+    breakdown = per_feature_morphology_score(pred_features, target_features, weights, epsilon)
 
     total_weight = 0.0
     weighted_sum = 0.0
 
-    for feature, similarity in similarities.items():
-        if feature in weights:
-            weight = weights[feature]
-            weighted_sum += weight * similarity
-            total_weight += weight
+    for feature, vals in breakdown.items():
+        weighted_sum += vals["contribution"]
+        total_weight += vals["weight"]
 
     if total_weight > 0:
         return weighted_sum / total_weight

@@ -20,9 +20,9 @@ def print_morphology_feature_summary(
     across both folds and cells, then prints a table showing for every feature:
 
     * **Weight**       – SHAP importance weight (same for all cells)
-    * **Performance**  – mean similarity × 100  (i.e. % performance; 100% = perfect)
+    * **Performance**  – mean (1 - error) × 100  (i.e. % accuracy; 100% = perfect)
     * **Error**        – mean symmetric relative error (0 = perfect, 1 = worst)
-    * **Contribution** – mean (weight × similarity) / total_weight × 100
+    * **Contribution** – mean (weight × performance) / total_weight × 100
                          showing how much each feature contributes to the final score
 
     Args:
@@ -45,13 +45,13 @@ def print_morphology_feature_summary(
 
     # Accumulate per-feature statistics
     feature_stats: Dict[str, Dict[str, List[float]]] = {
-        f: {"similarity": [], "error": [], "weight": [], "contribution": []}
+        f: {"performance": [], "error": [], "weight": [], "contribution": []}
         for f in feature_names
     }
     for cell_breakdown in all_cell_breakdowns:
         for feature, vals in cell_breakdown.items():
             if feature in feature_stats:
-                feature_stats[feature]["similarity"].append(vals["similarity"])
+                feature_stats[feature]["performance"].append(vals["performance"])
                 feature_stats[feature]["error"].append(vals["error"])
                 feature_stats[feature]["weight"].append(vals["weight"])
                 feature_stats[feature]["contribution"].append(vals["contribution"])
@@ -63,9 +63,9 @@ def print_morphology_feature_summary(
         s = feature_stats[feature]
         mean_weight = float(np.mean(s["weight"])) if s["weight"] else 0.0
         mean_stats[feature] = {
-            "similarity": float(np.mean(s["similarity"])) if s["similarity"] else 0.0,
-            "error":      float(np.mean(s["error"]))      if s["error"]      else 0.0,
-            "weight":     mean_weight,
+            "performance":  float(np.mean(s["performance"]))  if s["performance"]  else 0.0,
+            "error":        float(np.mean(s["error"]))        if s["error"]        else 0.0,
+            "weight":       mean_weight,
             "contribution": float(np.mean(s["contribution"])) if s["contribution"] else 0.0,
         }
         total_weight += mean_weight
@@ -111,7 +111,7 @@ def print_morphology_feature_summary(
     for feature in sorted_features:
         v = mean_stats[feature]
         weight_pct  = v["weight"]  / total_weight * 100 if total_weight > 0 else 0.0
-        perf_pct    = v["similarity"] * 100
+        perf_pct    = v["performance"] * 100
         error_val   = v["error"]
         # Contribution as % of the final score denominator
         contrib_pct = v["contribution"] / total_weight * 100 if total_weight > 0 else 0.0
@@ -134,7 +134,7 @@ def print_morphology_feature_summary(
     )
     print("=" * 80)
     print("  Weight:       % share of total SHAP importance")
-    print("  Performance:  mean per-feature similarity (100% = perfect match)")
+    print("  Performance:  mean (1 - error) per feature (100% = perfect match)")
     print("  Error:        mean symmetric relative error (0 = perfect)")
     print("  Contribution: weighted contribution to the final morphology score")
     print("=" * 80 + "\n")
