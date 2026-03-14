@@ -16,7 +16,7 @@ from pathlib import Path
 # Setup imports from initial_pipeline for morphology features
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from morphology.morphology_features import get_morphological_features
-from morphology.morphology_metrics import weighted_morphology_score, ALL_FEATURE_COLUMNS
+from morphology.morphology_metrics import weighted_morphology_score, per_feature_morphology_score, ALL_FEATURE_COLUMNS
 from segmentation.soma_segmentation.gaussian_filter import get_gaussian_filter_soma_masks
 
 
@@ -150,6 +150,69 @@ def morphology_similarity_score(pred_mask, target_mask, soma_mask=None, image_rg
 
     # ---- SHAP-weighted similarity across all 25 features -------------------
     return weighted_morphology_score(pred_feats, target_feats)
+
+
+def morphology_similarity_score_detailed(pred_mask, target_mask, soma_mask=None, image_rgb=None, eps=1e-8):
+    """Compute morphological feature similarity with a full per-feature breakdown.
+
+    Identical to :func:`morphology_similarity_score` but additionally returns a
+    per-feature dict so callers can inspect which features drove the score.
+
+    Args:
+        pred_mask   : Predicted whole-cell mask tensor [H, W].
+        target_mask : Ground-truth whole-cell mask tensor [H, W].
+        soma_mask   : Ground-truth soma mask tensor [H, W], or None.
+        image_rgb   : Original RGB image as a uint8 numpy array [H, W, 3].
+        eps         : Small epsilon (kept for API compatibility).
+
+    Returns:
+        Tuple of:
+            score       – scalar morphology similarity in [0, 1]
+            breakdown   – dict mapping feature name → dict with keys
+                          ``error``, ``performance``, ``weight``, ``contribution``
+                          Returns an empty dict on failure.
+    """
+    pred_np   = (pred_mask   > 0.5).cpu().numpy().astype(np.uint8)
+    target_np = (target_mask > 0.5).cpu().numpy().astype(np.uint8)
+
+    if not pred_np.any() or not target_np.any():
+        return 0.0, {}
+
+    pred_soma_np = None
+    if image_rgb is not None:
+        try:
+            H, W = image_rgb.shape[:2]
+            box = np.array([[0, 0, W, H]], dtype=np.float32)
+            soma_masks_list = get_gaussian_filter_soma_masks(
+                boxes=box,
+                image_path=None,
+                image_rgb=image_rgb,
+                output_name=None,
+                scan_folder=None,
+                output_to_file=False,
+            )
+            if soma_masks_list:
+                pred_soma_np = (soma_masks_list[0] > 0).astype(np.uint8)
+        except Exception:
+            pred_soma_np = None
+
+    target_soma_np = None
+    if soma_mask is not None:
+        target_soma_np = (soma_mask > 0.5).cpu().numpy().astype(np.uint8)
+
+    try:
+        pred_tuple   = get_morphological_features(pred_np,   soma_mask=pred_soma_np)
+        target_tuple = get_morphological_features(target_np, soma_mask=target_soma_np)
+    except Exception:
+        return 0.0, {}
+
+    pred_feats   = pd.Series(dict(zip(ALL_FEATURE_COLUMNS, pred_tuple)))
+    target_feats = pd.Series(dict(zip(ALL_FEATURE_COLUMNS, target_tuple)))
+
+    score     = weighted_morphology_score(pred_feats, target_feats)
+    breakdown = per_feature_morphology_score(pred_feats, target_feats)
+
+    return score, breakdown
 
 
 def compute_binary_metrics(pred: torch.Tensor, target: torch.Tensor, 
