@@ -53,3 +53,4 @@ initial_pipeline/object_detection/custom_detection/object_detection_output
 initial_pipeline/object_detection/custom_detection/cv_runs
 initial_pipeline/object_detection/custom_detection/yolo_runs_transfer
 initial_pipeline/object_detection/custom_detection/__pycache__
+full_pipeline_venv
