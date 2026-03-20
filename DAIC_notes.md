@@ -65,8 +65,9 @@ sbatch job_file.sh
 squeue - check the status of jobs on the system
 scancel - cancel a job and delete it from the queue
 
-scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints/best_run_25_1.pth ./learning_curve_2x2.png 
+scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints/best_run_25_1.pth ./
 
+scp ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/object_detection/custom_detection/yolo_good_runs/28_2_rat_pretraining.pt ./
 
 Links 
 https://daic.tudelft.nl/docs/manual/connecting/
