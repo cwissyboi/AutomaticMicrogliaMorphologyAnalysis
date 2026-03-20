@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=general
 #SBATCH --qos=short
-#SBATCH --time=1:30:00
+#SBATCH --time=2:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
