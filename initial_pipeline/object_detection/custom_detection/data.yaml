@@ -1,4 +1,4 @@
-path: ../../../../DetectionDatasets/YOLO_dataset_with_al
+path: ../../../../DetectionDatasets/YOLO_dataset_with_edge_confidence
 train: images/train
 val: images/val
 test: images/test

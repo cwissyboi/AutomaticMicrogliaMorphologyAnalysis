@@ -78,6 +78,14 @@ def parse_args():
         help="Ignore class labels during inference"
     )
 
+    parser.add_argument(
+        "--max_images",
+        type=int,
+        default=None,
+        help="Maximum number of flagged images to save (e.g. 1000). "
+             "Scanning stops as soon as this limit is reached."
+    )
+
     return vars(parser.parse_args())
 
 
