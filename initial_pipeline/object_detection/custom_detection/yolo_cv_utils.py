@@ -68,12 +68,25 @@ def print_yolo_metrics(metrics, fold=None):
         )
 
 
+def resolve_dataset_root(data_yaml_path, data_config):
+    """Resolve dataset root, supporting paths relative to YAML location."""
+    dataset_root = Path(data_config['path'])
+    if not dataset_root.is_absolute():
+        dataset_root = (Path(data_yaml_path).parent / dataset_root).resolve()
+    return dataset_root
+
+
 def collect_all_data(data_yaml_path):
     """Collect all images and labels from train/val/test splits."""
+    data_yaml_path = Path(data_yaml_path)
+
+    if not data_yaml_path.exists():
+        raise FileNotFoundError(f"Dataset YAML not found: {data_yaml_path}")
+
     with open(data_yaml_path, 'r') as f:
         data_config = yaml.safe_load(f)
-    
-    dataset_root = Path(data_config['path'])
+
+    dataset_root = resolve_dataset_root(data_yaml_path, data_config)
     all_images = []
     
     # Collect from all splits
@@ -88,6 +101,51 @@ def collect_all_data(data_yaml_path):
     print(f"Collected {total} total images from all splits")
     
     return all_images, dataset_root, data_config
+
+
+def normalize_class_names(names):
+    """Normalize class names mapping for robust config comparison."""
+    if isinstance(names, dict):
+        return {int(k): str(v) for k, v in names.items()}
+    if isinstance(names, list):
+        return {i: str(v) for i, v in enumerate(names)}
+    raise ValueError(f"Unsupported 'names' format in YAML: {type(names)}")
+
+
+def validate_compatible_data_configs(primary_config, additional_config):
+    """Ensure primary and additional datasets share class definitions."""
+    primary_nc = int(primary_config['nc'])
+    additional_nc = int(additional_config['nc'])
+
+    if primary_nc != additional_nc:
+        raise ValueError(
+            "Primary and additional datasets must have the same class count "
+            f"(primary nc={primary_nc}, additional nc={additional_nc})."
+        )
+
+    primary_names = normalize_class_names(primary_config['names'])
+    additional_names = normalize_class_names(additional_config['names'])
+
+    if primary_names != additional_names:
+        raise ValueError(
+            "Primary and additional datasets must have identical class names. "
+            f"Primary names={primary_names}, additional names={additional_names}."
+        )
+
+
+def duplicate_filenames(image_paths):
+    """Return sorted duplicate image basenames in a list of paths."""
+    seen = set()
+    duplicates = set()
+
+    for image_path in image_paths:
+        name = Path(image_path).name
+        if name in seen:
+            duplicates.add(name)
+        else:
+            seen.add(name)
+
+    return sorted(duplicates)
 
 
 def create_fold_structure(fold_dir, dataset_root):
@@ -174,7 +232,17 @@ def create_fold_yaml(fold_dir, data_config, fold_num):
     return yaml_path
 
 
-def setup_kfold_data(all_images, dataset_root, data_config, folds_root, train_ratio=0.7, val_ratio=0.1, test_ratio=0.2, n_splits=5):
+def setup_kfold_data(
+    all_images,
+    dataset_root,
+    data_config,
+    folds_root,
+    train_ratio=0.7,
+    val_ratio=0.1,
+    test_ratio=0.2,
+    n_splits=5,
+    additional_train_images=None,
+):
     """Setup K-fold cross-validation data structure with specified split proportions.
     
     Args:
@@ -189,6 +257,17 @@ def setup_kfold_data(all_images, dataset_root, data_config, folds_root, train_ra
     """
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=RANDOM_SEED)
     all_images = np.array(all_images)
+    additional_train_images = list(additional_train_images or [])
+
+    additional_duplicates = duplicate_filenames(additional_train_images)
+    if additional_duplicates:
+        sample = additional_duplicates[:10]
+        raise ValueError(
+            "Additional dataset contains duplicate image filenames that would overwrite in fold train dirs. "
+            f"Examples: {sample}"
+        )
+
+    additional_name_set = {Path(p).name for p in additional_train_images}
     
     total = len(all_images)
     print(f"\nUsing split proportions:")
@@ -219,9 +298,18 @@ def setup_kfold_data(all_images, dataset_root, data_config, folds_root, train_ra
         val_images = all_fold_images[n_train:n_train+n_val]
         test_images = all_fold_images[n_train+n_val:]
         
-        print(f"  Train: {len(train_images)} ({len(train_images)/len(all_fold_images)*100:.1f}%)")
+        print(f"  Train (primary): {len(train_images)} ({len(train_images)/len(all_fold_images)*100:.1f}%)")
         print(f"  Val: {len(val_images)} ({len(val_images)/len(all_fold_images)*100:.1f}%)")
         print(f"  Test: {len(test_images)} ({len(test_images)/len(all_fold_images)*100:.1f}%)")
+
+        train_name_set = {Path(p).name for p in train_images}
+        overlap = sorted(train_name_set & additional_name_set)
+        if overlap:
+            sample = overlap[:10]
+            raise ValueError(
+                f"Fold {fold_idx + 1}: primary and additional train data share image filenames. "
+                f"These would overwrite in fold train dirs. Examples: {sample}"
+            )
         
         # Create fold directory structure with shorter name
         fold_dir = folds_root / f'f{fold_idx + 1}'  # Shorter fold name
@@ -232,11 +320,22 @@ def setup_kfold_data(all_images, dataset_root, data_config, folds_root, train_ra
             copy_file_pair(Path(img), 
                          fold_dir / 'images' / 'train',
                          fold_dir / 'labels' / 'train')
+
+        for img in additional_train_images:
+            copy_file_pair(
+                Path(img),
+                fold_dir / 'images' / 'train',
+                fold_dir / 'labels' / 'train'
+            )
         
         for img in val_images:
             copy_file_pair(Path(img),
                          fold_dir / 'images' / 'val',
                          fold_dir / 'labels' / 'val')
+
+        total_train = len(train_images) + len(additional_train_images)
+        print(f"  Added additional train images: {len(additional_train_images)}")
+        print(f"  Total train images in fold: {total_train}")
         
         # Create YAML config for this fold
         yaml_path = create_fold_yaml(fold_dir, data_config, fold_idx + 1)
@@ -347,8 +446,9 @@ def aggregate_metrics(all_metrics):
     return metrics_dict
 
 
-def run_kfold_cv(data_yaml_path, runs_dir, device, train_ratio=0.7, val_ratio=0.1, 
+def run_kfold_cv(data_yaml_path, runs_dir, device, train_ratio=0.7, val_ratio=0.1,
                  test_ratio=0.2, n_folds=5, yolo_starting_model=None, train_params=None,
+                 additional_data_yaml_path=None,
                  run_name_prefix="cv"):
     """Run complete k-fold cross-validation training.
     
@@ -362,6 +462,8 @@ def run_kfold_cv(data_yaml_path, runs_dir, device, train_ratio=0.7, val_ratio=0.
         n_folds: Number of folds (default 5)
         yolo_starting_model: Optional starting model for fine-tuning
         train_params: Optional dict of training parameters
+        additional_data_yaml_path: Optional additional dataset YAML whose images
+            (all splits) are appended to each fold's training set
         run_name_prefix: Prefix for run name (default "cv")
     
     Returns:
@@ -383,9 +485,28 @@ def run_kfold_cv(data_yaml_path, runs_dir, device, train_ratio=0.7, val_ratio=0.
     print("="*60)
     
     all_images, dataset_root, data_config = collect_all_data(data_yaml_path)
-    fold_configs = setup_kfold_data(all_images, dataset_root, data_config, folds_root, 
-                                    train_ratio=train_ratio, val_ratio=val_ratio, 
-                                    test_ratio=test_ratio, n_splits=n_folds)
+
+    additional_train_images = []
+    if additional_data_yaml_path is not None:
+        print(f"Using additional training data YAML: {additional_data_yaml_path}")
+        additional_train_images, _, additional_data_config = collect_all_data(additional_data_yaml_path)
+        validate_compatible_data_configs(data_config, additional_data_config)
+        print(
+            "Additional dataset images from train/val/test will be appended to each fold's train split: "
+            f"{len(additional_train_images)} images"
+        )
+
+    fold_configs = setup_kfold_data(
+        all_images,
+        dataset_root,
+        data_config,
+        folds_root,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        n_splits=n_folds,
+        additional_train_images=additional_train_images,
+    )
 
     # Train each fold
     all_metrics = []

@@ -28,6 +28,7 @@ scp -r YOLO_dataset_with_al ccharlesworth@login.daic.tudelft.nl:/tudelft.net/sta
 
 scp -r YOLO_dataset_with_edge_confidence ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/DetectionDatasets/
 
+scp -r YOLO_dataset_with_random ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/DetectionDatasets/
 scp -r All_scans_tiled ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 
 scp -r custom_segmentation ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/
@@ -158,3 +159,7 @@ sacct -j 12254770 --format=JobID,JobName%100
 run_segmentation_mean_teacher_joint.sh 
 run_segmentation_mean_teacher_joint_pseudo_label_w_1.sh 
 run_segmentation_mean_teacher_joint_pseudo_label_w_5.sh 
+
+python yolo_find_threshold_annotations.py --input_folder_path ../../../../ScanData/All_scans_tiled --output_name edge_confidence_cells --max_images 487
+
+python yolo_find_random_annotations.py --input_folder_path ../../../../ScanData/All_scans_tiled --output_name random_cells --max_images 487
