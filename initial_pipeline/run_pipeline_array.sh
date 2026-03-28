@@ -36,7 +36,7 @@ if [ -z "${SCAN_NAME}" ]; then
     exit 1
 fi
 
-INPUT_PATH="../../ScanData/All_scans_tiled/${SCAN_NAME}/"
+INPUT_PATH="../../ScanData/All_scans_AD/${SCAN_NAME}/"
 
 echo "Array task : ${SLURM_ARRAY_TASK_ID}"
 echo "Scan name  : ${SCAN_NAME}"
@@ -48,7 +48,7 @@ echo "Start time : $(date)"
 
 srun python -u main.py \
     --input_folder_path "${INPUT_PATH}" \
-    --output_name all_scans_run \
+    --output_name all_scans_ad_run \
     --scan_name "${SCAN_NAME}"
 
 echo "Finished    : $(date)"

@@ -18,7 +18,7 @@ scp 28_2_rat_pretraining.pt ccharlesworth@login.daic.tudelft.nl:/tudelft.net/sta
 
 scp best_run_25_1.pth ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/segmentation/custom_segmentation/checkpoints
 
-scp All_scans_tiled.zip ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/ScanData/
+scp All_scans_AD.zip ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/ScanData/
 
 scp -r YOLO_rat_adjusted_2_split ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/
 

@@ -17,4 +17,4 @@ source ~/.bashrc
 conda activate /home/nfs/ccharlesworth/segmentation_conda
 
 echo "starting job file"
-srun python -u main.py --input_folder_path "../../ScanData\10_patients_GM_tiles" --output_name 10_patients_GM_tiles
+srun python -u main.py --input_folder_path "../../ScanData\All_scans_AD" --output_name All_scans_AD

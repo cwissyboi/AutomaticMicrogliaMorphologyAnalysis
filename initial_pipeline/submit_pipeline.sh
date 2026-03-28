@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-SCAN_DIR="../../ScanData/All_scans_tiled"
+SCAN_DIR="../../ScanData/All_scans_AD"
 SCAN_LIST="scan_list.txt"
 
 # Build the scan list from subdirectories of the scan data folder
