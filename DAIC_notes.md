@@ -60,6 +60,7 @@ scp [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefile ./
 Copy a folder from DAIC to computer 
 scp -r [<YourNetID>@]login.daic.tudelft.nl:~/origin_path_on_DAIC/remotefolder ./
 
+
 scp -r ccharlesworth@login.daic.tudelft.nl:/tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis/AutomaticMicrogliaMorphologyAnalysis/initial_pipeline/morphology/morphology_outputs ./
 
 
