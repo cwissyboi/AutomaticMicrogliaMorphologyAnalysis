@@ -55,3 +55,4 @@ initial_pipeline/object_detection/custom_detection/yolo_runs_transfer
 initial_pipeline/object_detection/custom_detection/__pycache__
 full_pipeline_venv
 initial_pipeline/morphology/morphology_outputs/yolo_al_dataset
+*.csv

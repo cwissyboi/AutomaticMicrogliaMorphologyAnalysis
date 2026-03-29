@@ -10,6 +10,13 @@ from scipy.spatial.distance import cdist
 from scipy.stats import entropy as scipy_entropy
 from sklearn.metrics import silhouette_score
 from sklearn.neighbors import NearestNeighbors
+import glob
+import os
+import time
+from openTSNE import TSNE as openTSNE
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
 
 
 def continuity(X_high: np.ndarray, X_low: np.ndarray, n_neighbors: int = 10) -> float:
@@ -184,3 +191,124 @@ def soft_cluster_metrics(
         f"Max-entropy for k={k} (bits)": round(max_possible_ent, 4),
         f"% cells > {threshold} confidence": round(pct_confident, 1),
     }
+
+def get_morphology_results_from_folder(folder_path = r"C:\Users\chris\Desktop\University\Thesis\PipelineResults\Many_Patients", remove_outlier_sizes = False, remove_edges = False): 
+    csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
+
+    dfs = []
+    for path in csv_files:
+        temp_df = pd.read_csv(path)
+        temp_df = temp_df.rename(columns={"scan_folder": "scan_name"})
+        dfs.append(temp_df)
+
+        df = pd.concat(dfs, ignore_index=True)
+
+    features = [
+            "skeleton_length",
+            "num_junctions",
+            "num_components",
+            "num_end_nodes",
+            "num_start_nodes",
+            "total_nodes",
+            "end_to_start_ratio",
+            "soma_area",
+            "soma_perimeter",
+            "soma_circularity",
+            "cell_area",
+            "cell_perimeter",
+            "cell_convex_hull_area",
+            "cell_convex_hull_perimeter",
+            "cell_solidity",
+            "cell_convexity",
+            "cell_circularity",
+            "cell_convex_circularity",
+            "branch_area",
+            "branch_perimeter",
+            "sholl_min_radius",
+            "sholl_peak_radius",
+            "sholl_max_radius",
+            "sholl_peak",
+            "sholl_sum",
+    ]
+
+    print(f"Number of cells in analysis {len(df)}")
+
+    if (remove_outlier_sizes):
+        lower = df["cell_area"].quantile(0.002)
+        upper = df["cell_area"].quantile(0.998)
+
+        df = df[
+            (df["cell_area"] >= lower) &
+            (df["cell_area"] <= upper)
+        ].copy()
+
+        print(f"Removed very small or very large cells")
+
+        print(f"Number of cells in analysis {len(df)}")
+    
+    if (remove_edges):
+        # Tiles are 512x512 pixels.
+        # A cell whose bounding box touches any edge of the tile was clipped and
+        # therefore not fully visible. We remove any cell where:
+        #   xmin == 0  (touches left edge)
+        #   ymin == 0  (touches top edge)
+        #   xmax >= TILE_SIZE - 1  (touches right edge)
+        #   ymax >= TILE_SIZE - 1  (touches bottom edge)
+
+        TILE_SIZE = 512
+
+        before = len(df)
+
+        df = df[
+            (df["xmin"] > 0 + 1) &
+            (df["ymin"] > 0 + 1) &
+            (df["xmax"] < TILE_SIZE - 1) &
+            (df["ymax"] < TILE_SIZE - 1)
+        ].copy()
+
+        print(f"Removed {before - len(df)} border-clipped cells ({before} -> {len(df)})")
+
+    X = df[features].dropna()
+    X_scaled = StandardScaler().fit_transform(X)
+
+    return df, X_scaled
+
+
+def get_tsne_subsampled_and_projected(X_scaled, tsne_subsample = 30000, n_components = 4):
+    tsne_subsample = 30000  # fit t-SNE on this many cells, then transform the rest
+  
+    n_cells = len(X_scaled)
+    if tsne_subsample is not None and tsne_subsample < n_cells:
+        rng = np.random.default_rng(42)
+        tsne_fast_idx = np.sort(rng.choice(n_cells, size=tsne_subsample, replace=False))
+    else:
+        tsne_fast_idx = np.arange(n_cells)
+
+    X_tsne_fast_input = X_scaled[tsne_fast_idx]
+    tsne_fast_rest_idx = np.setdiff1d(np.arange(n_cells), tsne_fast_idx, assume_unique=True)
+
+    t0 = time.perf_counter()
+
+    tsne_fast = openTSNE(
+        n_components=n_components,
+        perplexity=30,
+        # negative_gradient_method='fft',  # FFT-accelerated, much faster than exact/bh
+        negative_gradient_method='bh',  # bh allows you to do dim reduction to 4 rather than 2
+        n_jobs=6,                        # use all CPU cores
+        random_state=42,
+        # n_iter = 10
+    )
+    tsne_fast_embedding = tsne_fast.fit(X_tsne_fast_input)
+    fast_time = time.perf_counter() - t0
+
+    print(f'openTSNE runtime (fit {len(tsne_fast_idx)} data points) in {fast_time:.2f}s')
+    X_tsne_fast = np.empty((n_cells, n_components), dtype=np.float32)
+    X_tsne_fast[tsne_fast_idx] = np.asarray(tsne_fast_embedding)
+
+    if len(tsne_fast_rest_idx) > 0:
+        X_tsne_fast[tsne_fast_rest_idx] = np.asarray(tsne_fast_embedding.transform(X_scaled[tsne_fast_rest_idx], n_iter = 5, learning_rate = 0.1, perplexity = 30 ))
+        # X_tsne_fast[tsne_fast_rest_idx] = np.asarray(tsne_fast_embedding.transform(X_scaled[tsne_fast_rest_idx]))
+
+    transform_time = time.perf_counter() - fast_time
+    print(f'openTSNE transform time (transformed {len(tsne_fast_rest_idx)} datapoints): {transform_time:.2f}s')
+    return X_tsne_fast
