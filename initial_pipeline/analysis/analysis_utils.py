@@ -312,3 +312,77 @@ def get_tsne_subsampled_and_projected(X_scaled, tsne_subsample = 30000, n_compon
     transform_time = time.perf_counter() - fast_time
     print(f'openTSNE transform time (transformed {len(tsne_fast_rest_idx)} datapoints): {transform_time:.2f}s')
     return X_tsne_fast
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+
+def plot_cluster_distribution_per_scan(
+    final_props_df,
+    cluster_type="hard",   # "hard" or "soft"
+    title_prefix="Per-scan cluster proportions",
+):
+    if cluster_type not in {"hard", "soft"}:
+        raise ValueError("cluster_type must be 'hard' or 'soft'")
+
+    required_cols = {"scan_name", "diagnosis_group"}
+    missing_required = required_cols - set(final_props_df.columns)
+    if missing_required:
+        raise ValueError(f"Missing required columns: {missing_required}")
+
+    cluster_prefix = f"{cluster_type}_cluster_"
+    cluster_cols = [c for c in final_props_df.columns if c.startswith(cluster_prefix)]
+    if not cluster_cols:
+        raise ValueError(f"No columns found matching prefix '{cluster_prefix}'")
+
+    # sort clusters numerically: *_0, *_1, ...
+    cluster_cols = sorted(cluster_cols, key=lambda x: int(x.split("_")[-1]))
+    n_clusters_local = len(cluster_cols)
+
+    cmap = cm.viridis
+    norm = mcolors.Normalize(vmin=0, vmax=max(1, n_clusters_local - 1))
+    cluster_colours = {c: cmap(norm(i)) for i, c in enumerate(cluster_cols)}
+
+    for diagnosis in ["AD", "100+"]:
+        sub = final_props_df.loc[final_props_df["diagnosis_group"] == diagnosis].copy()
+        if sub.empty:
+            print(f"No rows found for diagnosis_group='{diagnosis}'")
+            continue
+
+        # optional: stable order
+        sub = sub.sort_values("scan_name")
+
+        scans = sub["scan_name"].tolist()
+        n_scans = len(scans)
+        x = np.arange(n_scans)
+        bar_width = 0.8 / n_clusters_local
+
+        fig, ax = plt.subplots(figsize=(max(12, n_scans * 0.5), 6))
+
+        for i, col in enumerate(cluster_cols):
+            offsets = x + (i - n_clusters_local / 2 + 0.5) * bar_width
+            values = sub[col].values
+            cluster_id = col.replace(cluster_prefix, "")
+
+            ax.bar(
+                offsets,
+                values,
+                width=bar_width,
+                color=cluster_colours[col],
+                label=f"{cluster_type.capitalize()} {cluster_id}",
+                edgecolor="white",
+                linewidth=0.4,
+            )
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(scans, rotation=60, ha="right", fontsize=8)
+        ax.set_ylabel("Proportion of cells")
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{title_prefix} ({cluster_type.capitalize()}) - {diagnosis}")
+        ax.legend(title="Cluster", bbox_to_anchor=(1.01, 1), loc="upper left")
+
+        plt.tight_layout()
+        plt.show()
