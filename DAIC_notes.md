@@ -4,6 +4,8 @@ ssh ccharlesworth@login.daic.tudelft.nl
 
 cd /tudelft.net/staff-umbrella/AutomaticMicrogliaMorphologyAnalysis
 
+cd /tudelft.net/staff-umbrella/StudentsCVlab/
+
 
 Copy a file from computer to DAIC
 $ scp make_env_job.sh ccharlesworth@login.daic.tudelft.nl:~/test_code/

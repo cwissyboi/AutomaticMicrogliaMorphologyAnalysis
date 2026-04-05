@@ -386,3 +386,108 @@ def plot_cluster_distribution_per_scan(
 
         plt.tight_layout()
         plt.show()
+
+
+import numpy as np
+import plotly.graph_objects as go
+import plotly.io as pio
+
+# Force Plotly to open figures in browser
+
+
+def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title=None):
+    pio.renderers.default = "browser"
+    cluster_cols = [f"{cluster_type}_cluster_{i}" for i in range(4)]
+    required = ["diagnosis_group", "scan_name"] + cluster_cols
+    missing = [c for c in required if c not in full_df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df_plot = full_df.copy()
+
+    # Normalize rows defensively
+    P = df_plot[cluster_cols].to_numpy(dtype=float)
+    row_sums = P.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0):
+        raise ValueError("Found rows with non-positive composition sum.")
+    P = P / row_sums
+
+    # Regular tetrahedron vertices
+    V = np.array([
+        [0.0, 0.0, 0.0],                        # cluster 0
+        [1.0, 0.0, 0.0],                        # cluster 1
+        [0.5, np.sqrt(3)/2, 0.0],               # cluster 2
+        [0.5, np.sqrt(3)/6, np.sqrt(2/3)]       # cluster 3
+    ])
+
+    # Barycentric projection to 3D
+    X = P @ V  # (n, 3)
+
+    # Colors by diagnosis
+    groups = df_plot["diagnosis_group"].astype(str).values
+    color_map = {"AD": "#d62728", "100+": "#1f77b4"}
+    fallback = "#2ca02c"
+
+    fig = go.Figure()
+
+    # Tetrahedron edges
+    edges = [(0,1), (0,2), (0,3), (1,2), (1,3), (2,3)]
+    for i, j in edges:
+        fig.add_trace(go.Scatter3d(
+            x=[V[i,0], V[j,0]],
+            y=[V[i,1], V[j,1]],
+            z=[V[i,2], V[j,2]],
+            mode="lines",
+            line=dict(color="gray", width=3),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    # Points per group
+    for g in sorted(np.unique(groups)):
+        idx = groups == g
+        fig.add_trace(go.Scatter3d(
+            x=X[idx, 0],
+            y=X[idx, 1],
+            z=X[idx, 2],
+            mode="markers",
+            name=g,
+            marker=dict(size=4, color=color_map.get(g, fallback), opacity=0.85),
+            text=df_plot.loc[idx, "scan_name"],
+            hovertemplate=(
+                "scan: %{text}<br>"
+                "diagnosis: " + g + "<br>"
+                f"{cluster_cols[0]}: " + "%{customdata[0]:.3f}<br>"
+                f"{cluster_cols[1]}: " + "%{customdata[1]:.3f}<br>"
+                f"{cluster_cols[2]}: " + "%{customdata[2]:.3f}<br>"
+                f"{cluster_cols[3]}: " + "%{customdata[3]:.3f}<extra></extra>"
+            ),
+            customdata=P[idx]
+        ))
+
+    # Vertex labels
+    for i in range(4):
+        fig.add_trace(go.Scatter3d(
+            x=[V[i,0]], y=[V[i,1]], z=[V[i,2]],
+            mode="text",
+            text=[f"{cluster_type}_cluster_{i}"],
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    if title is None:
+        title = f"{cluster_type.capitalize()} cluster compositions (interactive tetrahedron)"
+
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title="x",
+            yaxis_title="y",
+            zaxis_title="z",
+            aspectmode="cube"
+        ),
+        legend_title="diagnosis_group",
+        margin=dict(l=0, r=0, b=0, t=40),
+    )
+
+    fig.show(renderer="browser")
