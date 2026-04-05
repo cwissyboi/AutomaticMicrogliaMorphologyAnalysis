@@ -2,6 +2,183 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import gammaln
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+
+
+DEFAULT_MORPHOLOGY_FEATURES = [
+    "skeleton_length",
+    "num_junctions",
+    "num_components",
+    "num_end_nodes",
+    "num_start_nodes",
+    "total_nodes",
+    "end_to_start_ratio",
+    "soma_area",
+    "soma_perimeter",
+    "soma_circularity",
+    "cell_area",
+    "cell_perimeter",
+    "cell_convex_hull_area",
+    "cell_convex_hull_perimeter",
+    "cell_solidity",
+    "cell_convexity",
+    "cell_circularity",
+    "cell_convex_circularity",
+    "branch_area",
+    "branch_perimeter",
+    "sholl_min_radius",
+    "sholl_peak_radius",
+    "sholl_max_radius",
+    "sholl_peak",
+    "sholl_sum",
+]
+
+
+def select_representative_morphology_features_scan_level(
+    scan_level_df,
+    candidate_features,
+    corr_method="spearman",
+    corr_threshold=0.7,
+):
+    """
+    Select one representative feature from each cluster of correlated features.
+
+    Strategy
+    --------
+    1) Compute feature-feature correlation matrix at scan level.
+    2) Cluster features with distance = 1 - abs(correlation).
+    3) For each cluster, pick the most central feature (highest mean abs corr
+       within that cluster).
+
+    Parameters
+    ----------
+    scan_level_df : pd.DataFrame
+        One row per scan.
+    candidate_features : list[str]
+        Morphology feature names to consider.
+    corr_method : str
+        Correlation method passed to pandas.DataFrame.corr.
+    corr_threshold : float
+        Features with abs(corr) roughly above this threshold will tend to be
+        grouped together.
+
+    Returns
+    -------
+    dict
+        {
+          'representative_features': list[str],
+          'feature_cluster_map': pd.DataFrame,
+          'correlation_matrix': pd.DataFrame,
+        }
+    """
+
+    feats = [f for f in candidate_features if f in scan_level_df.columns]
+    if not feats:
+        raise ValueError("No candidate morphology features found in scan_level_df")
+
+    X = scan_level_df[feats].copy()
+
+    # Remove features that are unusable for correlation clustering.
+    # - all NaN
+    # - constant within scan-level table (no variance)
+    usable = []
+    dropped = []
+    for f in feats:
+        col = X[f]
+        if col.isna().all():
+            dropped.append((f, "all_nan"))
+            continue
+        if col.nunique(dropna=True) <= 1:
+            dropped.append((f, "constant"))
+            continue
+        usable.append(f)
+
+    if not usable:
+        raise ValueError("All candidate morphology features were constant or NaN at scan level")
+
+    if len(usable) == 1:
+        feature_cluster_map = pd.DataFrame({"feature": usable, "feature_cluster": [1]})
+        corr = pd.DataFrame([[1.0]], index=usable, columns=usable)
+        return {
+            "representative_features": usable,
+            "feature_cluster_map": feature_cluster_map,
+            "correlation_matrix": corr,
+            "dropped_features": pd.DataFrame(dropped, columns=["feature", "drop_reason"]),
+        }
+
+    corr = X[usable].corr(method=corr_method).fillna(0.0)
+    dist = 1.0 - corr.abs()
+    np.fill_diagonal(dist.values, 0.0)
+
+    Z = linkage(squareform(dist.values, checks=False), method="average")
+    cluster_labels = fcluster(Z, t=(1.0 - corr_threshold), criterion="distance")
+
+    feature_cluster_map = pd.DataFrame({
+        "feature": usable,
+        "feature_cluster": cluster_labels,
+    }).sort_values(["feature_cluster", "feature"]).reset_index(drop=True)
+
+    representatives = []
+    for cid, g in feature_cluster_map.groupby("feature_cluster"):
+        cluster_feats = g["feature"].tolist()
+        if len(cluster_feats) == 1:
+            representatives.append(cluster_feats[0])
+            continue
+        sub_corr = corr.loc[cluster_feats, cluster_feats].abs()
+        centrality = sub_corr.mean(axis=1)
+        representatives.append(centrality.idxmax())
+
+    representatives = sorted(set(representatives))
+
+    return {
+        "representative_features": representatives,
+        "feature_cluster_map": feature_cluster_map,
+        "correlation_matrix": corr,
+        "dropped_features": pd.DataFrame(dropped, columns=["feature", "drop_reason"]),
+    }
+
+
+def choose_best_morphology_features_for_testing(
+    df_work,
+    possible_morphology_features,
+    scan_col,
+    diagnosis_col,
+    scan_features=None,
+    corr_method="spearman",
+    corr_threshold=0.7,
+):
+    """
+    Select a representative morphology feature set from a constrained candidate list.
+
+    The candidate pool is filtered *before* correlation clustering to include only
+    features explicitly listed in possible_morphology_features and present in df_work.
+    """
+    if scan_features is None:
+        scan_features = []
+
+    # Filter first: only consider user-provided morphology subset.
+    filtered_candidates = [
+        f for f in possible_morphology_features
+        if f in df_work.columns and pd.api.types.is_numeric_dtype(df_work[f])
+    ]
+    if not filtered_candidates:
+        raise ValueError("No valid morphology features found from possible_morphology_features")
+
+    # Build scan-level table for correlation-based representative selection.
+    agg_map = {f: "mean" for f in filtered_candidates}
+    for c in [diagnosis_col] + list(scan_features):
+        if c in df_work.columns:
+            agg_map[c] = "first"
+    scan_level_tmp = df_work.groupby(scan_col, as_index=False).agg(agg_map)
+
+    selected = select_representative_morphology_features_scan_level(
+        scan_level_df=scan_level_tmp,
+        candidate_features=filtered_candidates,
+        corr_method=corr_method,
+        corr_threshold=corr_threshold,
+    )
+    return selected
 
 
 def mixed_effect_morphology_feature_tests(
@@ -90,17 +267,22 @@ def mixed_effect_morphology_feature_tests(
     _ = random_state
 
     if morphology_features is None:
-        # Infer numeric candidate features and drop known metadata-like columns.
-        inferred = df_work.select_dtypes(include=[np.number]).columns.tolist()
-        exclude = {
-            "tile_id",
-            "x",
-            "y",
-            "centroid_x",
-            "centroid_y",
-            "hard_cluster",
-        }
-        morphology_features = [c for c in inferred if c not in exclude]
+        selected = choose_best_morphology_features_for_testing(
+            df_work=df_work,
+            possible_morphology_features=DEFAULT_MORPHOLOGY_FEATURES,
+            scan_col=scan_col,
+            diagnosis_col=diagnosis_col,
+            scan_features=scan_features,
+            corr_method="spearman",
+            corr_threshold=0.7,
+        )
+        morphology_features = selected["representative_features"]
+
+        print("Selected representative morphology features (scan-level correlation clustering):")
+        print(morphology_features)
+        if not selected["dropped_features"].empty:
+            print("Dropped features during selection (all_nan/constant):")
+            print(selected["dropped_features"].to_string(index=False))
 
     # Build scan-level table:
     # - mean morphology per scan
