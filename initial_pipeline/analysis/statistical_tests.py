@@ -7,30 +7,32 @@ from scipy.special import gammaln
 def mixed_effect_morphology_feature_tests(
     df_analysis,
     morphology_features=None,
+    scan_features=None,
     diagnosis_col="diagnosis_group",
     scan_col="scan_name",
     group_a="AD",
     group_b="100+",
-    max_cells_per_scan=2000,
+    max_cells_per_scan=None,
     random_state=42,
     apply_fdr=True,
 ):
     """
-    Test morphology-feature differences between diagnosis groups with a
-    random-intercept mixed-effects model.
+    Build scan-level means and test morphology-feature differences between
+    diagnosis groups while adjusting for scan-level covariates.
 
-    Plain-English model:
-      feature_value = (overall baseline) + (AD vs 100+ effect) +
-                      (scan-specific baseline offset) + noise
+    Step 1 (aggregation):
+      Collapse cell-level rows to one row per scan_name:
+      - morphology features: mean within scan
+      - diagnosis_group + scan_features: one value per scan (first value,
+        after consistency checks)
 
-    Mathematical form (for one feature y_{ij}):
-      y_{ij} = beta_0 + beta_1 * I[group_i = AD] + b_j + epsilon_{ij}
-      b_j ~ Normal(0, sigma_scan^2), epsilon_{ij} ~ Normal(0, sigma^2)
+    Step 2 (model per feature at scan level):
+      y_s = beta_0 + beta_1 * I[group_s = AD] + sum_k gamma_k * X_{s,k} + epsilon_s
+      where X_{s,k} are scan_features covariates (e.g., Sex).
 
     Why this helps:
-      Cells from the same scan are correlated. A mixed model explicitly models
-      that correlation via b_j (random intercept per scan), instead of treating
-      all cells as independent.
+      Aggregating to scan level avoids cell-level pseudo-replication and makes
+      diagnosis inference happen at the scan/patient unit.
 
     Parameters
     ----------
@@ -39,6 +41,9 @@ def mixed_effect_morphology_feature_tests(
     morphology_features : list[str] | None
         Feature columns to test. If None, infer numeric columns and exclude
         obvious metadata.
+    scan_features : list[str] | None
+        Scan-level covariates to include in the model (e.g., ['Sex']).
+        These are carried into the scan-level dataframe without averaging.
     diagnosis_col : str
         Column with diagnosis labels.
     scan_col : str
@@ -55,15 +60,21 @@ def mixed_effect_morphology_feature_tests(
 
     Returns
     -------
-    pd.DataFrame
-        One row per feature with mixed-model effect estimate and uncertainty.
+    dict
+        {
+          'scan_level_df': one row per scan with mean morphology + scan features,
+          'model_results': one row per feature with adjusted diagnosis effect.
+        }
     """
 
     # Import inside the function so other utilities in this module can still be
     # used even if statsmodels is unavailable in a given environment.
     import statsmodels.formula.api as smf
 
-    required_cols = {diagnosis_col, scan_col}
+    if scan_features is None:
+        scan_features = []
+
+    required_cols = {diagnosis_col, scan_col, *scan_features}
     missing = required_cols - set(df_analysis.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -73,22 +84,10 @@ def mixed_effect_morphology_feature_tests(
     if df_work.empty:
         raise ValueError(f"No rows found for groups {group_a} and {group_b}")
 
-    # Optional downsampling to keep mixed-model fitting computationally feasible.
-    # This preserves scan-level structure by sampling *within each scan*.
-    if max_cells_per_scan is not None:
-        rng = np.random.default_rng(random_state)
-
-        def _sample_scan(g):
-            if len(g) <= max_cells_per_scan:
-                return g
-            idx = rng.choice(g.index.to_numpy(), size=max_cells_per_scan, replace=False)
-            return g.loc[idx]
-
-        df_work = (
-            df_work.groupby(scan_col, group_keys=False)
-            .apply(_sample_scan)
-            .reset_index(drop=True)
-        )
+    # max_cells_per_scan is kept for backward-compatible signature.
+    # After scan-level aggregation it is not used.
+    _ = max_cells_per_scan
+    _ = random_state
 
     if morphology_features is None:
         # Infer numeric candidate features and drop known metadata-like columns.
@@ -103,33 +102,69 @@ def mixed_effect_morphology_feature_tests(
         }
         morphology_features = [c for c in inferred if c not in exclude]
 
+    # Build scan-level table:
+    # - mean morphology per scan
+    # - diagnosis + scan_features carried over per scan
+    agg_map = {f: "mean" for f in morphology_features if f in df_work.columns}
+    for c in [diagnosis_col] + list(scan_features):
+        if c in df_work.columns:
+            agg_map[c] = "first"
+
+    scan_level_df = (
+        df_work.groupby(scan_col, as_index=False)
+        .agg(agg_map)
+    )
+
+    # Basic consistency checks: diagnosis and scan_features should be constant
+    # within each scan in most datasets.
+    check_cols = [diagnosis_col] + list(scan_features)
+    for c in check_cols:
+        if c not in df_work.columns:
+            continue
+        nunique_per_scan = df_work.groupby(scan_col)[c].nunique(dropna=False)
+        if (nunique_per_scan > 1).any():
+            n_bad = int((nunique_per_scan > 1).sum())
+            print(
+                f"Warning: column '{c}' has >1 distinct value in {n_bad} scans; "
+                "using first value during scan-level aggregation."
+            )
+
     # Parameter name generated by statsmodels for the diagnosis fixed effect.
     # We set group_b as reference, so coefficient means (group_a - group_b).
     effect_name = f"C({diagnosis_col}, Treatment(reference='{group_b}'))[T.{group_a}]"
 
     rows = []
     for feature in morphology_features:
-        if feature not in df_work.columns:
+        if feature not in scan_level_df.columns:
             continue
 
-        sub = df_work[[feature, diagnosis_col, scan_col]].dropna().copy()
+        model_cols = [feature, diagnosis_col] + list(scan_features)
+        sub = scan_level_df[model_cols].dropna().copy()
         if sub.empty:
             continue
 
-        # Need both groups and at least 2 scans for random-effect estimation.
+        # Need both groups for diagnosis contrast.
         present_groups = set(sub[diagnosis_col].unique())
         if not ({group_a, group_b} <= present_groups):
             continue
-        if sub[scan_col].nunique() < 2:
-            continue
 
-        # Mixed model with scan-level random intercept.
-        # Plain English: each scan gets its own baseline offset.
-        formula = f"{feature} ~ C({diagnosis_col}, Treatment(reference='{group_b}'))"
+        # Scan-level regression adjusted for scan_features.
+        # Categorical covariates use C(...), numeric covariates stay numeric.
+        cov_terms = []
+        for c in scan_features:
+            if c not in sub.columns:
+                continue
+            if pd.api.types.is_numeric_dtype(sub[c]):
+                cov_terms.append(c)
+            else:
+                cov_terms.append(f"C({c})")
+
+        rhs_terms = [f"C({diagnosis_col}, Treatment(reference='{group_b}'))"] + cov_terms
+        formula = f"{feature} ~ {' + '.join(rhs_terms)}"
 
         try:
-            model = smf.mixedlm(formula=formula, data=sub, groups=sub[scan_col], re_formula="1")
-            result = model.fit(reml=False, method="lbfgs", maxiter=500, disp=False)
+            model = smf.ols(formula=formula, data=sub)
+            result = model.fit()
 
             coef = float(result.params.get(effect_name, np.nan))
             se = float(result.bse.get(effect_name, np.nan))
@@ -140,23 +175,16 @@ def mixed_effect_morphology_feature_tests(
             ci_low = coef - 1.96 * se if pd.notna(se) else np.nan
             ci_high = coef + 1.96 * se if pd.notna(se) else np.nan
 
-            # Estimated random-effect variance component for scan intercepts.
-            scan_var = np.nan
-            if result.cov_re is not None and result.cov_re.shape == (1, 1):
-                scan_var = float(result.cov_re.iloc[0, 0])
-
             rows.append(
                 {
                     "feature": feature,
-                    "n_cells": int(len(sub)),
-                    "n_scans": int(sub[scan_col].nunique()),
+                    "n_scans": int(len(sub)),
                     f"coef_{group_a}_minus_{group_b}": coef,
                     "se": se,
                     "z_stat": z_stat,
                     "p_value": p_val,
                     "ci_2.5%": ci_low,
                     "ci_97.5%": ci_high,
-                    "scan_random_intercept_var": scan_var,
                     "converged": bool(getattr(result, "converged", False)),
                 }
             )
@@ -164,15 +192,13 @@ def mixed_effect_morphology_feature_tests(
             rows.append(
                 {
                     "feature": feature,
-                    "n_cells": int(len(sub)),
-                    "n_scans": int(sub[scan_col].nunique()),
+                    "n_scans": int(len(sub)),
                     f"coef_{group_a}_minus_{group_b}": np.nan,
                     "se": np.nan,
                     "z_stat": np.nan,
                     "p_value": np.nan,
                     "ci_2.5%": np.nan,
                     "ci_97.5%": np.nan,
-                    "scan_random_intercept_var": np.nan,
                     "converged": False,
                     "fit_error": str(exc),
                 }
@@ -194,14 +220,18 @@ def mixed_effect_morphology_feature_tests(
     sort_col = "q_value_fdr_bh" if apply_fdr and "q_value_fdr_bh" in out.columns else "p_value"
     out = out.sort_values(sort_col, na_position="last").reset_index(drop=True)
 
-    print("=== Mixed-effects feature test (random intercept by scan_name) ===")
+    print("=== Scan-level feature test (diagnosis adjusted for scan_features) ===")
+    print(f"Scan-level dataframe shape: {scan_level_df.shape}")
     print(
         "Interpretation: coef > 0 means higher values in "
-        f"{group_a} than {group_b} after accounting for scan-level variance."
+        f"{group_a} than {group_b} after adjusting for scan_features: {scan_features}."
     )
     print(out.to_string(index=False))
 
-    return out
+    return {
+        "scan_level_df": scan_level_df,
+        "model_results": out,
+    }
 
 def dirichlet_scan_level_group_comparison(
     full_df,
@@ -410,221 +440,3 @@ def dirichlet_scan_level_group_comparison(
         "bootstrap_successful": int(len(delta_mu_samples)),
         "cluster_cols": cols,
     }
-
-
-
-def mixed_effect_morphology_feature_tests_bambi(
-    df_analysis,
-    morphology_features=None,
-    diagnosis_col="diagnosis_group",
-    scan_col="scan_name",
-    group_a="AD",
-    group_b="100+",
-    max_cells_per_scan=2000,
-    random_state=42,
-    apply_fdr=True,
-):
-    """
-    Bayesian mixed-effects feature test using Bambi + PyMC.
-
-    Model (per feature):
-        feature ~ diagnosis_group + (1 | scan_name)
-
-    Interpretation:
-      - coef_AD_minus_100+ > 0 means higher values in AD than 100+,
-        accounting for scan-level random intercept variance.
-      - ci_2.5% / ci_97.5% are 95% posterior credible intervals.
-      - p_AD_gt_100+ is posterior probability that AD effect > 0.
-
-    Notes:
-      - This is Bayesian, so "p_value" here is a pseudo two-sided tail probability:
-            p_value = 2 * min(P(effect > 0), P(effect < 0))
-        (included mainly to keep output structure similar to your existing pipeline).
-    """
-    import numpy as np
-    import pandas as pd
-    import arviz as az
-    import bambi as bmb
-
-    required_cols = {diagnosis_col, scan_col}
-    missing = required_cols - set(df_analysis.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    # Keep only the two requested diagnosis groups
-    df_work = df_analysis[df_analysis[diagnosis_col].isin([group_a, group_b])].copy()
-    if df_work.empty:
-        raise ValueError(f"No rows found for groups {group_a} and {group_b}")
-
-    # Ensure reference coding: group_b baseline, group_a contrast
-    df_work[diagnosis_col] = pd.Categorical(
-        df_work[diagnosis_col],
-        categories=[group_b, group_a],
-        ordered=True,
-    )
-
-    # Optional per-scan subsampling
-    if max_cells_per_scan is not None:
-        rng = np.random.default_rng(random_state)
-
-        def _sample_scan(g):
-            if len(g) <= max_cells_per_scan:
-                return g
-            idx = rng.choice(g.index.to_numpy(), size=max_cells_per_scan, replace=False)
-            return g.loc[idx]
-
-        df_work = (
-            df_work.groupby(scan_col, group_keys=False)
-            .apply(_sample_scan)
-            .reset_index(drop=True)
-        )
-
-    # Feature inference if not provided
-    if morphology_features is None:
-        inferred = df_work.select_dtypes(include=[np.number]).columns.tolist()
-        exclude = {
-            "tile_id",
-            "x",
-            "y",
-            "centroid_x",
-            "centroid_y",
-            "hard_cluster",
-        }
-        morphology_features = [c for c in inferred if c not in exclude]
-
-    rows = []
-
-    for feature in morphology_features:
-        if feature not in df_work.columns:
-            continue
-
-        sub = df_work[[feature, diagnosis_col, scan_col]].dropna().copy()
-        if sub.empty:
-            continue
-
-        present_groups = set(sub[diagnosis_col].astype(str).unique())
-        if not ({group_a, group_b} <= present_groups):
-            continue
-        if sub[scan_col].nunique() < 2:
-            continue
-
-        formula = f"{feature} ~ {diagnosis_col} + (1|{scan_col})"
-
-        try:
-            # Gaussian family to mirror your previous linear mixed model setup
-            model = bmb.Model(formula=formula, data=sub, family="gaussian")
-
-            idata = model.fit(
-                draws=1000,
-                tune=1000,
-                chains=2,
-                cores=2,
-                random_seed=random_state,
-                target_accept=0.95,
-                progressbar=False,
-            )
-
-            posterior_vars = list(idata.posterior.data_vars)
-
-            # Find the diagnosis contrast term robustly
-            # Common names look like: diagnosis_group[AD]
-            effect_candidates = [
-                v for v in posterior_vars
-                if diagnosis_col in v and str(group_a) in v
-            ]
-            if not effect_candidates:
-                raise RuntimeError(
-                    f"Could not find posterior diagnosis effect term for {feature}. "
-                    f"Posterior vars: {posterior_vars}"
-                )
-            effect_var = sorted(effect_candidates)[0]
-
-            effect_samples = np.asarray(idata.posterior[effect_var]).reshape(-1)
-            coef = float(effect_samples.mean())
-            se = float(effect_samples.std(ddof=1))
-
-            hdi = az.hdi(effect_samples, hdi_prob=0.95)
-            ci_low = float(hdi[0])
-            ci_high = float(hdi[1])
-
-            p_ad_gt = float((effect_samples > 0).mean())
-            p_val = float(2.0 * min(p_ad_gt, 1.0 - p_ad_gt))  # pseudo 2-sided tail prob
-
-            # Try to recover random-intercept SD for scan and convert to variance
-            scan_var = np.nan
-            scan_sd_candidates = [
-                v for v in posterior_vars
-                if scan_col in v and ("sigma" in v.lower() or "sd" in v.lower())
-            ]
-            if scan_sd_candidates:
-                sd_samples = np.asarray(idata.posterior[sorted(scan_sd_candidates)[0]]).reshape(-1)
-                scan_var = float((sd_samples ** 2).mean())
-
-            # Divergences as a Bayesian fit-quality flag
-            n_div = 0
-            if hasattr(idata, "sample_stats") and "diverging" in idata.sample_stats:
-                n_div = int(np.asarray(idata.sample_stats["diverging"]).sum())
-
-            rows.append(
-                {
-                    "feature": feature,
-                    "n_cells": int(len(sub)),
-                    "n_scans": int(sub[scan_col].nunique()),
-                    f"coef_{group_a}_minus_{group_b}": coef,
-                    "se": se,
-                    "z_stat": np.nan,  # not directly used in this Bayesian workflow
-                    "p_value": p_val,
-                    "ci_2.5%": ci_low,
-                    "ci_97.5%": ci_high,
-                    f"p_{group_a}_gt_{group_b}": p_ad_gt,
-                    "scan_random_intercept_var": scan_var,
-                    "converged": bool(n_div == 0),
-                    "n_divergences": n_div,
-                }
-            )
-
-        except Exception as exc:
-            rows.append(
-                {
-                    "feature": feature,
-                    "n_cells": int(len(sub)),
-                    "n_scans": int(sub[scan_col].nunique()),
-                    f"coef_{group_a}_minus_{group_b}": np.nan,
-                    "se": np.nan,
-                    "z_stat": np.nan,
-                    "p_value": np.nan,
-                    "ci_2.5%": np.nan,
-                    "ci_97.5%": np.nan,
-                    f"p_{group_a}_gt_{group_b}": np.nan,
-                    "scan_random_intercept_var": np.nan,
-                    "converged": False,
-                    "n_divergences": np.nan,
-                    "fit_error": str(exc),
-                }
-            )
-
-    out = pd.DataFrame(rows)
-    if out.empty:
-        raise RuntimeError("No features were successfully evaluated by Bayesian mixed-effects modeling.")
-
-    if apply_fdr:
-        from statsmodels.stats.multitest import multipletests
-
-        valid = out["p_value"].notna()
-        out["q_value_fdr_bh"] = np.nan
-        if valid.any():
-            _, qvals, _, _ = multipletests(out.loc[valid, "p_value"].to_numpy(), method="fdr_bh")
-            out.loc[valid, "q_value_fdr_bh"] = qvals
-
-    sort_col = "q_value_fdr_bh" if apply_fdr and "q_value_fdr_bh" in out.columns else "p_value"
-    out = out.sort_values(sort_col, na_position="last").reset_index(drop=True)
-
-    print("=== Bayesian mixed-effects feature test (Bambi + PyMC; random intercept by scan_name) ===")
-    print(
-        "Interpretation: coef > 0 means higher values in "
-        f"{group_a} than {group_b} after accounting for scan-level variance.\n"
-        f"Also inspect p_{group_a}_gt_{group_b} and credible intervals."
-    )
-    print(out.to_string(index=False))
-
-    return out
