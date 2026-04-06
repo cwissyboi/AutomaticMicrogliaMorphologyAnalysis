@@ -35,6 +35,68 @@ DEFAULT_MORPHOLOGY_FEATURES = [
 ]
 
 
+def filter_small_scans_by_cell_count(
+    df_analysis,
+    scan_col="scan_name",
+    n_cells_col="n_cells",
+    min_cells_per_scan=None,
+    bottom_fraction=0.10,
+):
+    """
+    Remove scans with too few cells.
+
+    If min_cells_per_scan is provided, keep scans with n_cells >= threshold.
+    Otherwise remove the bottom `bottom_fraction` of scans by cell count.
+    """
+    if scan_col not in df_analysis.columns:
+        raise ValueError(f"Missing scan column: {scan_col}")
+
+    # Prefer precomputed per-scan cell counts if present (e.g., in
+    # final_cluster_props_df), otherwise fall back to counting rows.
+    if n_cells_col in df_analysis.columns:
+        scan_counts = (
+            df_analysis[[scan_col, n_cells_col]]
+            .dropna(subset=[scan_col, n_cells_col])
+            .drop_duplicates(subset=[scan_col])
+            .set_index(scan_col)[n_cells_col]
+            .astype(float)
+            .rename("n_cells")
+            .sort_values()
+        )
+    else:
+        scan_counts = (
+            df_analysis.groupby(scan_col)
+            .size()
+            .rename("n_cells")
+            .sort_values()
+        )
+    if scan_counts.empty:
+        return {
+            "df_filtered": df_analysis.copy(),
+            "scan_counts": scan_counts,
+            "threshold_used": np.nan,
+            "n_scans_removed": 0,
+        }
+
+    if min_cells_per_scan is not None:
+        threshold = int(min_cells_per_scan)
+    else:
+        if not (0 < bottom_fraction < 1):
+            raise ValueError("bottom_fraction must be between 0 and 1")
+        threshold = float(scan_counts.quantile(bottom_fraction))
+
+    keep_scans = scan_counts[scan_counts >= threshold].index
+    df_filtered = df_analysis[df_analysis[scan_col].isin(keep_scans)].copy()
+    n_removed = int(scan_counts.index.difference(keep_scans).shape[0])
+
+    return {
+        "df_filtered": df_filtered,
+        "scan_counts": scan_counts,
+        "threshold_used": threshold,
+        "n_scans_removed": n_removed,
+    }
+
+
 def select_representative_morphology_features_scan_level(
     scan_level_df,
     candidate_features,
@@ -192,6 +254,8 @@ def mixed_effect_morphology_feature_tests(
     max_cells_per_scan=None,
     random_state=42,
     apply_fdr=True,
+    remove_small_scans=False,
+    min_cells_per_scan_for_inclusion=None,
 ):
     """
     Build scan-level means and test morphology-feature differences between
@@ -234,6 +298,12 @@ def mixed_effect_morphology_feature_tests(
         RNG seed for optional subsampling.
     apply_fdr : bool
         If True, add Benjamini-Hochberg FDR q-values across features.
+    remove_small_scans : bool
+        If True, remove scans with low cell counts before aggregation/modeling.
+    min_cells_per_scan_for_inclusion : int | None
+        Used only when remove_small_scans=True.
+        - If int: keep scans with >= this many cells.
+        - If None: remove bottom 10% of scans by cell count.
 
     Returns
     -------
@@ -260,6 +330,20 @@ def mixed_effect_morphology_feature_tests(
     df_work = df_analysis[df_analysis[diagnosis_col].isin([group_a, group_b])].copy()
     if df_work.empty:
         raise ValueError(f"No rows found for groups {group_a} and {group_b}")
+
+    if remove_small_scans:
+        filtered = filter_small_scans_by_cell_count(
+            df_work,
+            scan_col=scan_col,
+            min_cells_per_scan=min_cells_per_scan_for_inclusion,
+            bottom_fraction=0.10,
+        )
+        df_work = filtered["df_filtered"]
+        print(
+            "Applied small-scan filter: "
+            f"threshold={filtered['threshold_used']}, "
+            f"removed_scans={filtered['n_scans_removed']}"
+        )
 
     # max_cells_per_scan is kept for backward-compatible signature.
     # After scan-level aggregation it is not used.
@@ -419,11 +503,14 @@ def dirichlet_scan_level_group_comparison(
     full_df,
     cluster_type="hard",                 # "hard" or "soft"
     diagnosis_col="diagnosis_group",
+    scan_col="scan_name",
     group_a="AD",
     group_b="100+",
     n_boot=1000,
     random_state=42,
     eps=1e-10,
+    remove_small_scans=False,
+    min_cells_per_scan_for_inclusion=None,
 ):
     """
     Dirichlet analysis on scan-level compositions.
@@ -431,6 +518,10 @@ def dirichlet_scan_level_group_comparison(
     full_df must contain:
       - diagnosis_col (e.g., diagnosis_group)
       - columns like f"{cluster_type}_cluster_0", ..., f"{cluster_type}_cluster_{K-1}"
+
+    Optional robustness pre-filter:
+      - If remove_small_scans=True, scans with low cell counts are removed
+        before Dirichlet fitting.
 
     Returns dict with:
       - group_fits: fitted Dirichlet parameters and implied moments per group
@@ -512,7 +603,23 @@ def dirichlet_scan_level_group_comparison(
     prefix = f"{cluster_type}_cluster_"
     cols = _cluster_cols(full_df, prefix)
 
-    df_use = full_df[[diagnosis_col] + cols].dropna().copy()
+    # Optional small-scan filtering for robustness checks.
+    work_df = full_df.copy()
+    if remove_small_scans:
+        filtered = filter_small_scans_by_cell_count(
+            work_df,
+            scan_col=scan_col,
+            min_cells_per_scan=min_cells_per_scan_for_inclusion,
+            bottom_fraction=0.10,
+        )
+        work_df = filtered["df_filtered"]
+        print(
+            "Applied small-scan filter before Dirichlet: "
+            f"threshold={filtered['threshold_used']}, "
+            f"removed_scans={filtered['n_scans_removed']}"
+        )
+
+    df_use = work_df[[diagnosis_col] + cols].dropna().copy()
     df_a = df_use[df_use[diagnosis_col] == group_a]
     df_b = df_use[df_use[diagnosis_col] == group_b]
 
