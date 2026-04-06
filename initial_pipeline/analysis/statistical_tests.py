@@ -622,3 +622,211 @@ def dirichlet_scan_level_group_comparison(
         "bootstrap_successful": int(len(delta_mu_samples)),
         "cluster_cols": cols,
     }
+
+
+def dirichlet_loocv_robustness_analysis(
+    full_df,
+    cluster_type="hard",
+    diagnosis_col="diagnosis_group",
+    scan_col="scan_name",
+    group_a="AD",
+    group_b="100+",
+    n_boot=1000,
+    random_state=42,
+    eps=1e-10,
+    only_check_ad=False,
+    plot=True,
+    verbose=False,
+):
+    """
+    Leave-one-out robustness analysis for Dirichlet scan-level group comparison.
+
+    What this does
+    --------------
+    1) Runs the baseline Dirichlet analysis on all scans.
+    2) Re-runs after dropping one scan at a time from group_a (e.g., AD).
+    3) Re-runs after dropping one scan at a time from group_b (e.g., 100+),
+       unless only_check_ad=True.
+    4) Summarizes how key cluster-level estimates change across runs.
+
+    Key outputs
+    -----------
+    - loocv_runs_df: long table with one row per (run, cluster)
+    - loocv_summary_df: per-cluster robustness summary, including
+      std/mean/min/max of delta and posterior probability
+    - baseline_result: full baseline result from dirichlet_scan_level_group_comparison
+    """
+    import io
+    import contextlib
+    import matplotlib.pyplot as plt
+
+    required_cols = {diagnosis_col, scan_col}
+    missing = required_cols - set(full_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    df_use = full_df[full_df[diagnosis_col].isin([group_a, group_b])].copy()
+    if df_use.empty:
+        raise ValueError(f"No rows found for groups {group_a} and {group_b}")
+
+    scans_a = df_use.loc[df_use[diagnosis_col] == group_a, scan_col].dropna().unique().tolist()
+    scans_b = df_use.loc[df_use[diagnosis_col] == group_b, scan_col].dropna().unique().tolist()
+    if len(scans_a) < 2 or len(scans_b) < 2:
+        raise ValueError("Need at least 2 scans per group for leave-one-out analysis")
+
+    def _run_dirichlet(df_in, rs):
+        if verbose:
+            return dirichlet_scan_level_group_comparison(
+                full_df=df_in,
+                cluster_type=cluster_type,
+                diagnosis_col=diagnosis_col,
+                group_a=group_a,
+                group_b=group_b,
+                n_boot=n_boot,
+                random_state=rs,
+                eps=eps,
+            )
+        # Silence verbose prints from the underlying function during LOOCV.
+        with contextlib.redirect_stdout(io.StringIO()):
+            return dirichlet_scan_level_group_comparison(
+                full_df=df_in,
+                cluster_type=cluster_type,
+                diagnosis_col=diagnosis_col,
+                group_a=group_a,
+                group_b=group_b,
+                n_boot=n_boot,
+                random_state=rs,
+                eps=eps,
+            )
+
+    # Baseline fit (all scans)
+    baseline_result = _run_dirichlet(df_use, random_state)
+    baseline_mean = baseline_result["mean_diff"].copy()
+    delta_col = f"delta_mean_{group_a}_minus_{group_b}"
+    p_col = f"p_{group_a}_gt_{group_b}"
+    if delta_col not in baseline_mean.columns or p_col not in baseline_mean.columns:
+        raise RuntimeError("Expected Dirichlet output columns not found in baseline mean_diff")
+
+    run_rows = []
+
+    # Leave-one-out in group_a
+    for i, scan_id in enumerate(scans_a):
+        df_sub = df_use[~((df_use[diagnosis_col] == group_a) & (df_use[scan_col] == scan_id))].copy()
+        res = _run_dirichlet(df_sub, random_state + 1000 + i)
+        md = res["mean_diff"].copy()
+        md["dropped_group"] = group_a
+        md["dropped_scan"] = scan_id
+        md["run_id"] = f"drop_{group_a}_{i}"
+        run_rows.append(md)
+
+    # Leave-one-out in group_b
+    if not only_check_ad:
+        for i, scan_id in enumerate(scans_b):
+            df_sub = df_use[~((df_use[diagnosis_col] == group_b) & (df_use[scan_col] == scan_id))].copy()
+            res = _run_dirichlet(df_sub, random_state + 2000 + i)
+            md = res["mean_diff"].copy()
+            md["dropped_group"] = group_b
+            md["dropped_scan"] = scan_id
+            md["run_id"] = f"drop_{group_b}_{i}"
+            run_rows.append(md)
+
+    loocv_runs_df = pd.concat(run_rows, ignore_index=True)
+
+    # Robustness summaries by cluster and dropped group
+    grp = loocv_runs_df.groupby(["cluster", "dropped_group"], as_index=False)
+    by_group_summary = grp.agg(
+        n_runs=("run_id", "nunique"),
+        delta_mean=(delta_col, "mean"),
+        delta_std=(delta_col, "std"),
+        delta_min=(delta_col, "min"),
+        delta_max=(delta_col, "max"),
+        p_mean=(p_col, "mean"),
+        p_std=(p_col, "std"),
+        p_min=(p_col, "min"),
+        p_max=(p_col, "max"),
+        frac_runs_p_gt_0_95=(p_col, lambda x: float(np.mean(x > 0.95))),
+    )
+
+    baseline_small = baseline_mean[["cluster", delta_col, p_col]].rename(
+        columns={
+            delta_col: "baseline_delta",
+            p_col: "baseline_p",
+        }
+    )
+
+    loocv_summary_df = by_group_summary.merge(baseline_small, on="cluster", how="left")
+    loocv_summary_df["delta_shift_abs_mean"] = (loocv_summary_df["delta_mean"] - loocv_summary_df["baseline_delta"]).abs()
+    loocv_summary_df["p_shift_abs_mean"] = (loocv_summary_df["p_mean"] - loocv_summary_df["baseline_p"]).abs()
+
+    print(f"=== Dirichlet LOOCV robustness ({cluster_type}) ===")
+    if only_check_ad:
+        print(f"Scans: {group_a}={len(scans_a)} (LOOCV), {group_b}={len(scans_b)} (baseline only)")
+    else:
+        print(f"Scans: {group_a}={len(scans_a)}, {group_b}={len(scans_b)}")
+    print("Baseline cluster mean differences:")
+    print(baseline_mean.to_string(index=False))
+    print("\nLOOCV summary (by dropped group):")
+    print(loocv_summary_df.to_string(index=False))
+
+    if plot:
+        # Plot 1: delta stability (mean +/- std across LOOCV runs)
+        clusters = baseline_small["cluster"].tolist()
+        x = np.arange(len(clusters), dtype=float)
+        offset = 0.12
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        plot_groups = [(group_a, -1, "tab:red")]
+        if not only_check_ad:
+            plot_groups.append((group_b, 1, "tab:blue"))
+
+        for g, sign, color in plot_groups:
+            d = loocv_summary_df[loocv_summary_df["dropped_group"] == g].set_index("cluster").reindex(clusters)
+            axes[0].errorbar(
+                x + sign * offset,
+                d["delta_mean"],
+                yerr=d["delta_std"],
+                fmt="o",
+                capsize=3,
+                color=color,
+                label=f"Drop-1 from {g}",
+            )
+
+        axes[0].plot(x, baseline_small["baseline_delta"], "ks-", label="Baseline")
+        axes[0].axhline(0, color="gray", linewidth=1)
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(clusters, rotation=45, ha="right")
+        axes[0].set_title("LOOCV stability: delta mean")
+        axes[0].set_ylabel(f"{delta_col}")
+        axes[0].legend()
+
+        # Plot 2: posterior directional probability stability
+        for g, sign, color in plot_groups:
+            d = loocv_summary_df[loocv_summary_df["dropped_group"] == g].set_index("cluster").reindex(clusters)
+            axes[1].errorbar(
+                x + sign * offset,
+                d["p_mean"],
+                yerr=d["p_std"],
+                fmt="o",
+                capsize=3,
+                color=color,
+                label=f"Drop-1 from {g}",
+            )
+
+        axes[1].plot(x, baseline_small["baseline_p"], "ks-", label="Baseline")
+        axes[1].axhline(0.5, color="gray", linewidth=1, linestyle="--")
+        axes[1].set_ylim(0, 1)
+        axes[1].set_xticks(x)
+        axes[1].set_xticklabels(clusters, rotation=45, ha="right")
+        axes[1].set_title("LOOCV stability: directional probability")
+        axes[1].set_ylabel(p_col)
+        axes[1].legend()
+
+        plt.tight_layout()
+        plt.show()
+
+    return {
+        "baseline_result": baseline_result,
+        "loocv_runs_df": loocv_runs_df,
+        "loocv_summary_df": loocv_summary_df,
+    }
