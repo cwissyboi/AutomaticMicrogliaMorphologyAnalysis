@@ -395,10 +395,15 @@ import plotly.io as pio
 # Force Plotly to open figures in browser
 
 
-def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title=None):
+def plot_tetrahedron_composition_interactive(
+    full_df,
+    cluster_type="hard",
+    title=None,
+    diagnosis_col="diagnosis_group",
+):
     pio.renderers.default = "browser"
     cluster_cols = [f"{cluster_type}_cluster_{i}" for i in range(4)]
-    required = ["diagnosis_group", "scan_name"] + cluster_cols
+    required = [diagnosis_col, "scan_name"] + cluster_cols
     missing = [c for c in required if c not in full_df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
@@ -423,10 +428,19 @@ def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title
     # Barycentric projection to 3D
     X = P @ V  # (n, 3)
 
-    # Colors by diagnosis
-    groups = df_plot["diagnosis_group"].astype(str).values
-    color_map = {"AD": "#d62728", "100+": "#1f77b4"}
-    fallback = "#2ca02c"
+    # Colors by selected grouping column
+    groups = df_plot[diagnosis_col].astype(str).values
+    unique_groups = sorted(np.unique(groups))
+    base_color_map = {"AD": "#d62728", "100+": "#1f77b4"}
+    remaining_groups = [g for g in unique_groups if g not in base_color_map]
+    palette = [
+        mcolors.to_hex(c)
+        for c in cm.get_cmap("tab20", max(1, len(remaining_groups))).colors
+    ]
+    color_map = {
+        **{g: base_color_map[g] for g in unique_groups if g in base_color_map},
+        **{g: palette[i] for i, g in enumerate(remaining_groups)},
+    }
 
     fig = go.Figure()
 
@@ -444,7 +458,7 @@ def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title
         ))
 
     # Points per group
-    for g in sorted(np.unique(groups)):
+    for g in unique_groups:
         idx = groups == g
         fig.add_trace(go.Scatter3d(
             x=X[idx, 0],
@@ -452,11 +466,11 @@ def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title
             z=X[idx, 2],
             mode="markers",
             name=g,
-            marker=dict(size=4, color=color_map.get(g, fallback), opacity=0.85),
+            marker=dict(size=4, color=color_map[g], opacity=0.85),
             text=df_plot.loc[idx, "scan_name"],
             hovertemplate=(
                 "scan: %{text}<br>"
-                "diagnosis: " + g + "<br>"
+                f"{diagnosis_col}: " + g + "<br>"
                 f"{cluster_cols[0]}: " + "%{customdata[0]:.3f}<br>"
                 f"{cluster_cols[1]}: " + "%{customdata[1]:.3f}<br>"
                 f"{cluster_cols[2]}: " + "%{customdata[2]:.3f}<br>"
@@ -486,7 +500,7 @@ def plot_tetrahedron_composition_interactive(full_df, cluster_type="hard", title
             zaxis_title="z",
             aspectmode="cube"
         ),
-        legend_title="diagnosis_group",
+        legend_title=diagnosis_col,
         margin=dict(l=0, r=0, b=0, t=40),
     )
 
