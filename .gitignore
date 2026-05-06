@@ -57,3 +57,5 @@ full_pipeline_venv
 initial_pipeline/morphology/morphology_outputs/yolo_al_dataset
 *.csv
 initial_pipeline/analysis/__pycache__
+initial_pipeline/analysis/yolo_cluster_label_dataset_100
+initial_pipeline/analysis/yolo_cluster_label_dataset_100.zip

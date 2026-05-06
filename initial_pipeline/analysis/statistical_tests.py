@@ -950,6 +950,7 @@ def dirichlet_loocv_robustness_analysis(
     only_check_ad=False,
     plot=True,
     verbose=False,
+    significance_theshold=0.9,
 ):
     """
     Leave-one-out robustness analysis for Dirichlet scan-level group comparison.
@@ -1047,6 +1048,7 @@ def dirichlet_loocv_robustness_analysis(
 
     # Robustness summaries by cluster and dropped group
     grp = loocv_runs_df.groupby(["cluster", "dropped_group"], as_index=False)
+    threshold_label = str(significance_theshold).replace(".", "_")
     by_group_summary = grp.agg(
         n_runs=("run_id", "nunique"),
         delta_mean=(delta_col, "mean"),
@@ -1057,7 +1059,12 @@ def dirichlet_loocv_robustness_analysis(
         p_std=(p_col, "std"),
         p_min=(p_col, "min"),
         p_max=(p_col, "max"),
-        frac_runs_p_gt_0_95=(p_col, lambda x: float(np.mean(x > 0.95))),
+        **{
+            f"frac_runs_p_gt_{threshold_label}": (
+                p_col,
+                lambda x: float(np.mean(x > significance_theshold)),
+            )
+        },
     )
 
     baseline_small = baseline_mean[["cluster", delta_col, p_col]].rename(
