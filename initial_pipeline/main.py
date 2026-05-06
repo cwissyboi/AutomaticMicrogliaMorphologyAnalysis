@@ -58,8 +58,8 @@ def main():
             if not image_path.is_file():
                 continue
 
-            # if (counter > 15): 
-            #     break
+            if (counter > 100): 
+                break
 
             counter = counter + 1
 
@@ -75,8 +75,9 @@ def main():
                 yolo,
                 image_path,
                 output_name=output_name,
-                output_to_file=False,
-                scan_folder=scan_name
+                output_to_file=True,
+                scan_folder=scan_name, 
+                confidence_threshold=0.25
             )
             if device == "cuda":
                 torch.cuda.synchronize()
@@ -124,7 +125,7 @@ def main():
                 image_path,
                 image_rgb,
                 output_name=output_name,
-                output_to_file=False,
+                output_to_file=True,
                 scan_folder=scan_name
             )
             timings["gaussian"] += time.perf_counter() - t0
@@ -136,7 +137,7 @@ def main():
                 image_path,
                 connected_masks,
                 soma_masks,
-                output_to_file=False,
+                output_to_file=True,
                 output_name=output_name,
                 scan_folder=scan_name
             )
