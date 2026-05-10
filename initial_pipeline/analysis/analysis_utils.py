@@ -16,6 +16,7 @@ import time
 from openTSNE import TSNE as openTSNE
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from sklearn.metrics import normalized_mutual_info_score
 from sklearn.preprocessing import StandardScaler
 
 
@@ -505,3 +506,109 @@ def plot_tetrahedron_composition_interactive(
     )
 
     fig.show(renderer="browser")
+
+
+def merge_expert_annotations(
+    df_cells: pd.DataFrame,
+    expert_annotations: str | Path | pd.DataFrame,
+    join_cols: tuple[str, str, str] = ("scan_name", "image_name", "global_cell_id"),
+    annotation_col: str = "cluster_annotation",
+) -> pd.DataFrame:
+    if isinstance(expert_annotations, (str, Path)):
+        expert_df = pd.read_csv(expert_annotations)
+    else:
+        expert_df = expert_annotations.copy()
+
+    required_cols = set(join_cols) | {annotation_col}
+    missing_expert = required_cols - set(expert_df.columns)
+    if missing_expert:
+        raise ValueError(f"Expert annotation table is missing columns: {sorted(missing_expert)}")
+
+    missing_cells = set(join_cols) - set(df_cells.columns)
+    if missing_cells:
+        raise ValueError(f"Cell dataframe is missing join columns: {sorted(missing_cells)}")
+
+    expert_df = expert_df.loc[:, list(required_cols)].copy()
+    expert_df = expert_df.drop_duplicates(subset=list(join_cols), keep="first")
+
+    merged = df_cells.merge(expert_df, on=list(join_cols), how="left", validate="many_to_one")
+    return merged
+
+
+def nmi_against_expert_annotations(
+    df_cells: pd.DataFrame,
+    method_to_cluster_col: dict[str, str],
+    annotation_col: str = "cluster_annotation",
+    ignore_expert_labels: tuple[str, ...] = ("microglia_to_annotate_cluster",),
+    average_method: str = "arithmetic",
+) -> pd.DataFrame:
+    if annotation_col not in df_cells.columns:
+        raise ValueError(f"'{annotation_col}' not found in dataframe.")
+
+    eval_df = df_cells.copy()
+    eval_df = eval_df[eval_df[annotation_col].notna()].copy()
+    if ignore_expert_labels:
+        eval_df = eval_df[~eval_df[annotation_col].isin(ignore_expert_labels)].copy()
+
+    results = []
+    for method_name, cluster_col in method_to_cluster_col.items():
+        if cluster_col not in eval_df.columns:
+            raise ValueError(f"Cluster column '{cluster_col}' (method '{method_name}') not found.")
+
+        method_df = eval_df[eval_df[cluster_col].notna()].copy()
+        n_cells = len(method_df)
+        if n_cells == 0:
+            nmi = np.nan
+            n_clusters = 0
+            n_expert_groups = 0
+        else:
+            y_true = method_df[annotation_col].astype(str)
+            y_pred = method_df[cluster_col].astype(str)
+            nmi = normalized_mutual_info_score(y_true, y_pred, average_method=average_method)
+            n_clusters = int(y_pred.nunique())
+            n_expert_groups = int(y_true.nunique())
+
+        results.append(
+            {
+                "method": method_name,
+                "cluster_col": cluster_col,
+                "n_overlap_cells": int(n_cells),
+                "n_clusters": n_clusters,
+                "n_expert_groups": n_expert_groups,
+                "NMI": float(nmi) if pd.notna(nmi) else np.nan,
+            }
+        )
+
+    return pd.DataFrame(results).sort_values("NMI", ascending=False, na_position="last").reset_index(drop=True)
+
+
+def confusion_matrix_against_expert_annotations(
+    df_cells: pd.DataFrame,
+    cluster_col: str,
+    annotation_col: str = "cluster_annotation",
+    ignore_expert_labels: tuple[str, ...] = ("microglia_to_annotate_cluster",),
+    normalize: str | None = None,
+) -> pd.DataFrame:
+    if annotation_col not in df_cells.columns:
+        raise ValueError(f"'{annotation_col}' not found in dataframe.")
+    if cluster_col not in df_cells.columns:
+        raise ValueError(f"'{cluster_col}' not found in dataframe.")
+
+    eval_df = df_cells[[annotation_col, cluster_col]].copy()
+    eval_df = eval_df[eval_df[annotation_col].notna() & eval_df[cluster_col].notna()].copy()
+    if ignore_expert_labels:
+        eval_df = eval_df[~eval_df[annotation_col].isin(ignore_expert_labels)].copy()
+
+    cm = pd.crosstab(eval_df[annotation_col], eval_df[cluster_col], dropna=False)
+
+    if normalize is None:
+        return cm
+    if normalize == "true":
+        return cm.div(cm.sum(axis=1).replace(0, np.nan), axis=0)
+    if normalize == "pred":
+        return cm.div(cm.sum(axis=0).replace(0, np.nan), axis=1)
+    if normalize == "all":
+        total = cm.to_numpy().sum()
+        return cm / total if total > 0 else cm
+
+    raise ValueError("normalize must be one of: None, 'true', 'pred', 'all'.")
