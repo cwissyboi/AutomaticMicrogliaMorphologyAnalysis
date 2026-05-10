@@ -58,8 +58,8 @@ def main():
             if not image_path.is_file():
                 continue
 
-            if (counter > 100): 
-                break
+            # if (counter > 100): 
+            #     break
 
             counter = counter + 1
 
@@ -77,7 +77,7 @@ def main():
                 output_name=output_name,
                 output_to_file=True,
                 scan_folder=scan_name, 
-                confidence_threshold=0.25
+                confidence_threshold=0.5
             )
             if device == "cuda":
                 torch.cuda.synchronize()

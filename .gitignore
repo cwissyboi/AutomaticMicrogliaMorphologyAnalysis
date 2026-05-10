@@ -60,3 +60,6 @@ initial_pipeline/analysis/__pycache__
 initial_pipeline/analysis/yolo_cluster_label_dataset_100
 initial_pipeline/analysis/yolo_cluster_label_dataset_100.zip
 initial_pipeline/morphology/skeleton_outputs
+initial_pipeline/analysis/yolo_cluster_label_dataset_160
+initial_pipeline/analysis/yolo_cluster_label_dataset_160.zip
+initial_pipeline/inspection
