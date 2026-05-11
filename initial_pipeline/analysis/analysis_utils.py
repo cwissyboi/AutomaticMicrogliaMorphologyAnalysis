@@ -95,11 +95,16 @@ def show_cluster_representatives(
 
         centroid = X_cluster.mean(axis=0, keepdims=True)
         distances = cdist(X_cluster, centroid, metric="euclidean").flatten()
-        closest_idxs = np.argsort(distances)[: min(n_representatives, len(distances))]
+        sorted_idxs = np.argsort(distances)
 
         reps = []
-        for idx in closest_idxs:
+        for idx in sorted_idxs:
+            if len(reps) >= n_representatives:
+                break
             row = cluster_df.iloc[idx]
+            image_path = scan_data_root / row["scan_name"] / f"{row['image_name']}.jpg"
+            if not image_path.exists():
+                continue
             reps.append(
                 {
                     "global_cell_id": row.get("global_cell_id", row.name),
@@ -110,10 +115,14 @@ def show_cluster_representatives(
                     "ymin": row["ymin"],
                     "xmax": row["xmax"],
                     "ymax": row["ymax"],
+                    "image_path": image_path,
                 }
             )
 
         n = len(reps)
+        if n == 0:
+            print(f"Cluster {cluster_id}: no available images found, skipping.")
+            continue
         fig, axes = plt.subplots(1, n, figsize=(6 * n, 6))
         if n == 1:
             axes = [axes]
@@ -121,13 +130,7 @@ def show_cluster_representatives(
         fig.suptitle(f"{title_prefix} {cluster_id} - {n} most central cells", fontsize=14)
 
         for ax, rep in zip(axes, reps):
-            image_path = scan_data_root / rep["scan_name"] / f"{rep['image_name']}.jpg"
-            image = cv2.imread(str(image_path))
-            if image is None:
-                ax.set_title(f"NOT FOUND\n{rep['image_name']}")
-                ax.axis("off")
-                continue
-
+            image = cv2.imread(str(rep["image_path"]))
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             x_min = int(rep["xmin"])
             y_min = int(rep["ymin"])
@@ -141,6 +144,64 @@ def show_cluster_representatives(
                 f"{rep['global_cell_id']}\nd={rep['distance_to_centroid']:.3f}",
                 fontsize=7,
             )
+
+        plt.tight_layout()
+        plt.show()
+
+
+def show_annotation_representatives(
+    df_source: pd.DataFrame,
+    scan_data_root: str | Path,
+    annotation_col: str = "cluster_annotation",
+    n_representatives: int = 4,
+) -> None:
+    scan_data_root = Path(scan_data_root)
+
+    annotated = df_source[df_source[annotation_col].notna()].copy()
+    if annotated.empty:
+        print(f"No rows with '{annotation_col}' set.")
+        return
+
+    for label in sorted(annotated[annotation_col].unique()):
+        group = annotated[annotated[annotation_col] == label]
+
+        reps = []
+        for _, row in group.iterrows():
+            if len(reps) >= n_representatives:
+                break
+            image_path = scan_data_root / row["scan_name"] / f"{row['image_name']}.jpg"
+            if not image_path.exists():
+                continue
+            reps.append({
+                "global_cell_id": row.get("global_cell_id", row.name),
+                "scan_name": row["scan_name"],
+                "image_name": row["image_name"],
+                "xmin": row["xmin"],
+                "ymin": row["ymin"],
+                "xmax": row["xmax"],
+                "ymax": row["ymax"],
+                "image_path": image_path,
+            })
+
+        n = len(reps)
+        if n == 0:
+            print(f"{label}: no images found, skipping.")
+            continue
+
+        fig, axes = plt.subplots(1, n, figsize=(6 * n, 6))
+        if n == 1:
+            axes = [axes]
+
+        fig.suptitle(f"{annotation_col}: {label}  ({len(group)} annotated cells, showing {n})", fontsize=14)
+
+        for ax, rep in zip(axes, reps):
+            image = cv2.imread(str(rep["image_path"]))
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            cv2.rectangle(image_rgb, (int(rep["xmin"]), int(rep["ymin"])),
+                          (int(rep["xmax"]), int(rep["ymax"])), (0, 0, 255), 2)
+            ax.imshow(image_rgb)
+            ax.axis("off")
+            ax.set_title(f"{rep['global_cell_id']}", fontsize=7)
 
         plt.tight_layout()
         plt.show()
@@ -582,13 +643,15 @@ def nmi_against_expert_annotations(
     return pd.DataFrame(results).sort_values("NMI", ascending=False, na_position="last").reset_index(drop=True)
 
 
-def confusion_matrix_against_expert_annotations(
+def contingency_matrix_against_expert_annotations(
     df_cells: pd.DataFrame,
     cluster_col: str,
     annotation_col: str = "cluster_annotation",
     ignore_expert_labels: tuple[str, ...] = ("microglia_to_annotate_cluster",),
-    normalize: str | None = None,
-) -> pd.DataFrame:
+    figsize: tuple[float, float] | None = None,
+) -> None:
+    import matplotlib.pyplot as plt
+
     if annotation_col not in df_cells.columns:
         raise ValueError(f"'{annotation_col}' not found in dataframe.")
     if cluster_col not in df_cells.columns:
@@ -600,15 +663,30 @@ def confusion_matrix_against_expert_annotations(
         eval_df = eval_df[~eval_df[annotation_col].isin(ignore_expert_labels)].copy()
 
     cm = pd.crosstab(eval_df[annotation_col], eval_df[cluster_col], dropna=False)
+    data = cm.values
 
-    if normalize is None:
-        return cm
-    if normalize == "true":
-        return cm.div(cm.sum(axis=1).replace(0, np.nan), axis=0)
-    if normalize == "pred":
-        return cm.div(cm.sum(axis=0).replace(0, np.nan), axis=1)
-    if normalize == "all":
-        total = cm.to_numpy().sum()
-        return cm / total if total > 0 else cm
+    n_rows, n_cols = data.shape
+    if figsize is None:
+        figsize = (max(6, n_cols * 1.4), max(4, n_rows * 0.9))
 
-    raise ValueError("normalize must be one of: None, 'true', 'pred', 'all'.")
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(data, aspect="auto", cmap="Blues")
+    plt.colorbar(im, ax=ax, label="Cell count")
+
+    ax.set_xticks(range(n_cols))
+    ax.set_yticks(range(n_rows))
+    ax.set_xticklabels([str(c) for c in cm.columns], rotation=45, ha="right")
+    ax.set_yticklabels(cm.index)
+    ax.set_xlabel(cluster_col)
+    ax.set_ylabel(annotation_col)
+    ax.set_title(f"Contingency matrix: {annotation_col} vs {cluster_col}")
+
+    thresh = data.max() / 2
+    for i in range(n_rows):
+        for j in range(n_cols):
+            count = int(data[i, j])
+            ax.text(j, i, str(count), ha="center", va="center",
+                    color="white" if count > thresh else "black", fontsize=9)
+
+    plt.tight_layout()
+    plt.show()
