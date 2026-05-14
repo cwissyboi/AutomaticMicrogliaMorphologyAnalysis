@@ -1,4 +1,4 @@
-path: ../../../../DetectionDatasets/YOLO_only_random
+path: ../../../../DetectionDatasets/RandomActiveLearningAdjusted
 train: images/train
 val: images/val
 test: images/test
